@@ -4,6 +4,7 @@ import json
 import random
 import time
 from argparse import ArgumentParser
+import csv
 
 # Third-party
 # for logging the model:
@@ -69,6 +70,61 @@ def _limit_batches(value):
     if value is None:
         return None
     return int(value) if value > 1 else float(value)
+
+
+class StepMeasurements(pl.Callback):
+    def __init__(self, warmup=5):
+        self.warmup = warmup
+        self.completed = 0
+        self.csv_path = f"step-measurements-{time.time_ns()}.csv"
+
+    def on_train_batch_start(self, trainer, model, batch, batch_idx):
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        self.started = time.perf_counter()
+
+    def on_train_batch_end(
+        self, trainer, model, outputs, batch, batch_idx
+    ):
+        torch.cuda.synchronize()
+        elapsed = time.perf_counter() - self.started
+
+        allocated = torch.cuda.max_memory_allocated() / 2**20
+        reserved = torch.cuda.max_memory_reserved() / 2**20
+
+        self.completed += 1
+        phase = "warmup" if self.completed <= self.warmup else "measured"
+
+        print(
+            f"\n{phase} step {self.completed}: "
+            f"{elapsed * 1000:.1f} ms, "
+            f"allocated={allocated:.1f} MiB, "
+            f"reserved={reserved:.1f} MiB",
+            flush=True,
+        )
+        with open(self.csv_path, "a", newline="") as file:
+            csv.writer(file).writerow([
+                self.completed,
+                phase,
+                trainer.current_epoch + 1,
+                elapsed * 1000,
+                allocated,
+                reserved,
+                model.grad_checkpointing,
+            ])
+
+    def on_train_start(self, trainer, model):
+        with open(self.csv_path, "x", newline="") as file:
+            csv.writer(file).writerow([
+                "step", "phase", "epoch", "step_ms",
+                "allocated_mib", "reserved_mib", "checkpointing",
+            ])
+
+        print(
+            f"Gradient checkpointing active: {model.grad_checkpointing}",
+            flush=True,
+        )
+        print(f"Measurements CSV: {self.csv_path}", flush=True)
 
 
 @logger.catch
@@ -977,6 +1033,7 @@ def main(input_args=None):
         save_on_train_epoch_end=True,
     )
     callbacks.append(last_ckpt_callback)
+    callbacks.append(StepMeasurements(warmup=5))
     # Log the LR to the training logger, so that a mis-restored schedule after
     # a restart is visible instead of only showing up as a worse loss.
     callbacks.append(
