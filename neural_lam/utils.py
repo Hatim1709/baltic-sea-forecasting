@@ -613,21 +613,25 @@ class IdentityModule(nn.Module):
         return args
 
 
-def make_gnn_seq(edge_index, num_gnn_layers, hidden_layers, hidden_dim):
+def make_gnn_seq(edge_index, num_gnn_layers, hidden_layers, hidden_dim,
+                 layer_type="interaction", attention_heads=None):
     """
     Make a sequential GNN module propagating both node and edge representations
     """
     if num_gnn_layers == 0:
         # If no layers, return identity
         return IdentityModule()
+
+    # Imported here to avoid a circular import (interaction_net imports utils)
+    from .sparse_attention import build_intra_layer
+
     return pyg.nn.Sequential(
         "mesh_rep, edge_rep",
         [
             (
-                interaction_net.InteractionNet(
-                    edge_index,
-                    hidden_dim,
-                    hidden_layers=hidden_layers,
+                build_intra_layer(
+                    layer_type, edge_index, hidden_dim, hidden_layers,
+                    attention_heads=attention_heads,
                 ),
                 "mesh_rep, mesh_rep, edge_rep -> mesh_rep, edge_rep",
             )

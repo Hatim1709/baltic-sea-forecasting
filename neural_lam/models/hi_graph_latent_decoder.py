@@ -35,6 +35,8 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
         output_std=True,
         num_grid_con_mesh_nodes=None,
         num_interior_nodes=None,
+        intra_layer_type="interaction",
+        attention_heads=None,
     ):
         super().__init__(
             hidden_dim,
@@ -98,7 +100,9 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
         self.intra_up_gnns = nn.ModuleList(
             [
                 utils.make_gnn_seq(
-                    edge_index, intra_level_layers, hidden_layers, hidden_dim
+                    edge_index, intra_level_layers, hidden_layers, hidden_dim,
+                    layer_type=intra_layer_type,
+                    attention_heads=attention_heads,
                 )
                 for edge_index in m2m_edge_index
             ]
@@ -106,7 +110,9 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
         self.intra_down_gnns = nn.ModuleList(
             [
                 utils.make_gnn_seq(
-                    edge_index, intra_level_layers, hidden_layers, hidden_dim
+                    edge_index, intra_level_layers, hidden_layers, hidden_dim,
+                    layer_type=intra_layer_type,
+                    attention_heads=attention_heads,
                 )
                 for edge_index in list(m2m_edge_index)[:-1]
                 # Not needed for level L

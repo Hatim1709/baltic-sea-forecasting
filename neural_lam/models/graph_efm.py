@@ -333,8 +333,16 @@ class GraphEFM(ARProbModel):
                 output_std=bool(args.output_std),
                 num_grid_con_mesh_nodes=self.num_grid_con_mesh_nodes,
                 num_interior_nodes=self.num_interior_nodes,
+                intra_layer_type=args.decoder_intra_layer,
+                attention_heads=args.attention_heads,
             )
+
         else:
+            if args.decoder_intra_layer != "interaction":
+                raise ValueError(
+                    "--decoder_intra_layer is only implemented for hierarchical graphs"
+                )
+
             self.encoder = GraphLatentEncoder(
                 latent_dim,
                 self.g2m_edge_index,
