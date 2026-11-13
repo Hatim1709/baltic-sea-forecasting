@@ -25,6 +25,14 @@ Mesh construction uses spherical or Euclidean k-means over sea points with Delau
     <em>One-step prediction in Njord-Baltic. The same latent-variable GNN is used on a Baltic cluster mesh, with additional lateral boundary forcing <code>B<sup>t−2:t</sup></code> from a global ocean model and atmospheric forcing <code>F<sup>t−2:t</sup></code>.</em>
 </p>
 
+# Experimental graph-parallel training
+
+See [the two-rank GraphEFM guide](docs/graph_parallel.md) for whole-graph
+ownership preparation and a checked `torchrun` training step. This path
+partitions graph-layer computation and differentiable halo exchange; global
+boundary representations and embedders remain replicated. CUDA/NCCL operation
+and capacity gains require measurement on the target GPUs.
+
 # Publications
 
 *If you use this code, please cite the relevant paper(s).*
