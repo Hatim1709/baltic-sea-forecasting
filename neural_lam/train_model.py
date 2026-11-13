@@ -71,9 +71,8 @@ def _limit_batches(value):
     return int(value) if value > 1 else float(value)
 
 
-@logger.catch
-def main(input_args=None):
-    """Main function for training and evaluating models."""
+def build_parser():
+    """Build the shared training parser without loading data or a model."""
     parser = ArgumentParser(
         description="Train or evaluate NeurWP models for LAM"
     )
@@ -830,6 +829,13 @@ def main(input_args=None):
     )
     add_flow_map_args(parser)
 
+    return parser
+
+
+@logger.catch
+def main(input_args=None):
+    """Main function for training and evaluating models."""
+    parser = build_parser()
     args = parser.parse_args(input_args)
     args.var_leads_metrics_watch = {
         int(k): v for k, v in json.loads(args.var_leads_metrics_watch).items()
