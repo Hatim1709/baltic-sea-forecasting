@@ -79,6 +79,8 @@ class StepMeasurements(pl.Callback):
         self.csv_path = f"step-measurements-{time.time_ns()}.csv"
 
     def on_train_batch_start(self, trainer, model, batch, batch_idx):
+        # Event counters (see checkpointing.py) restart for every update
+        checkpointing.reset_counts()
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats()
         self.started = time.perf_counter()
@@ -102,6 +104,16 @@ class StepMeasurements(pl.Callback):
             f"reserved={reserved:.1f} MiB",
             flush=True,
         )
+        # Everything below runs after the timer has stopped.
+        # The columns after "checkpointing" were added for the checkpoint
+        # policy benchmark and are only appended, so older readers of this
+        # CSV are unaffected.
+        counts = checkpointing.get_counts()
+        loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
+        loss = float(loss.detach()) if torch.is_tensor(loss) else ""
+        internal = any(
+            getattr(module, "ckpt_inner", False) for module in model.modules()
+        )
         with open(self.csv_path, "a", newline="") as file:
             csv.writer(file).writerow([
                 self.completed,
@@ -111,6 +123,12 @@ class StepMeasurements(pl.Callback):
                 allocated,
                 reserved,
                 model.grad_checkpointing,
+                getattr(model, "ckpt_policy", "auto"),
+                internal,
+                counts["layer_calls"],
+                counts["layer_blocks"],
+                counts["unroll_blocks"],
+                loss,
             ])
 
     def on_train_start(self, trainer, model):
@@ -118,10 +136,16 @@ class StepMeasurements(pl.Callback):
             csv.writer(file).writerow([
                 "step", "phase", "epoch", "step_ms",
                 "allocated_mib", "reserved_mib", "checkpointing",
+                "ckpt_policy", "internal_ckpt", "layer_calls",
+                "layer_blocks", "unroll_blocks", "loss",
             ])
 
         print(
             f"Gradient checkpointing active: {model.grad_checkpointing}",
+            flush=True,
+        )
+        print(
+            f"Checkpoint policy: {getattr(model, 'ckpt_policy', 'auto')}",
             flush=True,
         )
         print(f"Measurements CSV: {self.csv_path}", flush=True)

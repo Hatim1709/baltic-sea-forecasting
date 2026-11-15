@@ -118,8 +118,13 @@ class InteractionNet(pyg.nn.MessagePassing):
         """
         if checkpointing.internal_active(self):
             return checkpointing.run_checkpointed(
-                self._forward_impl, send_rep, rec_rep, edge_rep, emb
+                self._run_layer, send_rep, rec_rep, edge_rep, emb
             )
+        return self._run_layer(send_rep, rec_rep, edge_rep, emb)
+
+    def _run_layer(self, send_rep, rec_rep, edge_rep, emb=None):
+        """Run the layer computation and count it (see checkpointing.py)"""
+        checkpointing.count_layer_call()
         return self._forward_impl(send_rep, rec_rep, edge_rep, emb)
 
     def _forward_impl(self, send_rep, rec_rep, edge_rep, emb=None):
@@ -309,8 +314,13 @@ class FlexibleNet(pyg.nn.MessagePassing):
         """
         if checkpointing.internal_active(self):
             return checkpointing.run_checkpointed(
-                self._forward_impl, send_rep, rec_rep, edge_rep, emb
+                self._run_layer, send_rep, rec_rep, edge_rep, emb
             )
+        return self._run_layer(send_rep, rec_rep, edge_rep, emb)
+
+    def _run_layer(self, send_rep, rec_rep, edge_rep, emb=None):
+        """Run the layer computation and count it (see checkpointing.py)"""
+        checkpointing.count_layer_call()
         return self._forward_impl(send_rep, rec_rep, edge_rep, emb)
 
     def _forward_impl(self, send_rep, rec_rep, edge_rep, emb=None):

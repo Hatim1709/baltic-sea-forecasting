@@ -427,6 +427,7 @@ def test_hierarchical_decoder_unchanged_by_checkpointing():
             )
 
         decoder.zero_grad()
+        checkpointing.reset_counts()
         if unroll_checkpoint:
             mean, std = torch.utils.checkpoint.checkpoint(
                 step, *x.values(), use_reentrant=False
@@ -441,9 +442,13 @@ def test_hierarchical_decoder_unchanged_by_checkpointing():
             for v in x.values()
         ]
         param_grads = [p.grad.clone() for p in decoder.parameters()]
+        run.counts = checkpointing.get_counts()
         return [mean.detach(), std.detach()] + input_grads + param_grads
 
     reference = run(unroll_checkpoint=False)
+    # No checkpointing: every layer runs once (the "off" policy)
+    assert run.counts["layer_calls"] == 1 + 1 + 2 + 2 + (3 + 2) * intra_layers
+    assert run.counts["layer_blocks"] == 0
 
     # 1 grid-to-mesh + 1 mesh-to-grid + 2 up + 2 down
     # + 3 intra-level stacks going up and 2 going down, 2 layers each
@@ -458,3 +463,13 @@ def test_hierarchical_decoder_unchanged_by_checkpointing():
         assert len(result) == len(reference)
         for new, ref in zip(result, reference):
             torch.testing.assert_close(new, ref, rtol=1e-9, atol=1e-11)
+        n = expected_layers
+        if unroll:
+            # Whole step is recomputed once, and inside it every layer's own
+            # block is recomputed as well: 3N layer runs, 2N layer blocks
+            assert run.counts["layer_calls"] == 3 * n
+            assert run.counts["layer_blocks"] == 2 * n
+        else:
+            # Layers only: N blocks, each run once more in backward -> 2N
+            assert run.counts["layer_calls"] == 2 * n
+            assert run.counts["layer_blocks"] == n

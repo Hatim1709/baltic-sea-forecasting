@@ -414,6 +414,7 @@ class ARModel(pl.LightningModule):
             and self.training
             and torch.is_grad_enabled()
         ):
+            checkpointing.count_unroll_block()
             return torch.utils.checkpoint.checkpoint(
                 func, *args, use_reentrant=False
             )

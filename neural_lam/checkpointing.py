@@ -71,6 +71,37 @@ def policy_flags(policy, force_unroll, ar_steps_train):
     return _FIXED_POLICIES[policy]
 
 
+# Event counters, used by the benchmark to check that a policy really did
+# what it claims (e.g. that a recomputation happened). They count Python-level
+# events, cost nothing measurable and never affect results.
+#   layer_calls   executions of a GNN layer's computation, including those
+#                 repeated during backward (recomputation)
+#   layer_blocks  per-layer checkpoint blocks started in a forward pass
+#   unroll_blocks per-step checkpoint blocks started in a forward pass
+_COUNTS = {"layer_calls": 0, "layer_blocks": 0, "unroll_blocks": 0}
+
+
+def reset_counts():
+    """Set all event counters to zero"""
+    for key in _COUNTS:
+        _COUNTS[key] = 0
+
+
+def get_counts():
+    """Return a copy of the event counters"""
+    return dict(_COUNTS)
+
+
+def count_layer_call():
+    """Called each time a GNN layer's computation runs"""
+    _COUNTS["layer_calls"] += 1
+
+
+def count_unroll_block():
+    """Called each time a forecast step is started as a checkpointed block"""
+    _COUNTS["unroll_blocks"] += 1
+
+
 def internal_active(module):
     """
     Whether a GNN layer should currently run as a checkpointed block.
@@ -86,6 +117,7 @@ def run_checkpointed(func, *args):
     for backward but recomputed from args when needed. The non-reentrant
     variant is used, as recommended by PyTorch and as in ARModel.
     """
+    _COUNTS["layer_blocks"] += 1
     return torch.utils.checkpoint.checkpoint(func, *args, use_reentrant=False)
 
 
