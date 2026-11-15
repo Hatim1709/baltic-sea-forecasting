@@ -11,7 +11,7 @@ import torch
 import xarray as xr
 
 # Local
-from .. import metrics, utils, vis
+from .. import checkpointing, metrics, utils, vis
 from ..config import NeuralLAMConfig
 from ..datastore import BaseDatastore
 from ..loss_weighting import get_state_feature_weighting
@@ -373,13 +373,34 @@ class ARModel(pl.LightningModule):
         self.spatial_loss_maps = []
 
         # Whether to perform gradient checkpointing at each unroll step.
-        # On by default whenever more than one step is unrolled, since the
-        # stored activations then scale with the number of steps. Kept as a
-        # mutable flag so that the multi-phase schedules in train_model.py can
-        # toggle it when they change ar_steps_train between phases.
-        self.grad_checkpointing = (
-            args.grad_checkpointing or args.ar_steps_train > 1
+        # With the default policy "auto" this is on whenever more than one
+        # step is unrolled, since the stored activations then scale with the
+        # number of steps. Kept as a mutable flag so that the multi-phase
+        # schedules in train_model.py can toggle it (via update_checkpointing)
+        # when they change ar_steps_train between phases.
+        # Other policies (--ckpt_policy) are described in checkpointing.py.
+        self.ckpt_policy = getattr(args, "ckpt_policy", "auto")
+        self.grad_checkpointing, _ = checkpointing.policy_flags(
+            self.ckpt_policy, args.grad_checkpointing, args.ar_steps_train
         )
+        # Per-layer (internal) checkpointing is applied later, in
+        # update_checkpointing, since subclasses create the GNN layers after
+        # this constructor has run.
+
+    def update_checkpointing(self, ar_steps_train):
+        """Apply the checkpoint policy for a training phase.
+
+        Sets the step-level switch (grad_checkpointing) and switches the
+        per-layer checkpointing of all GNN layers on or off. Called once after
+        the model is built and again whenever ar_steps_train changes.
+        """
+        unroll, internal = checkpointing.policy_flags(
+            self.ckpt_policy,
+            self.args.grad_checkpointing,
+            ar_steps_train,
+        )
+        self.grad_checkpointing = unroll
+        checkpointing.set_internal_checkpointing(self, internal)
 
     def unroll_ckpt_func(self, func, *args):
         """Run one unroll step, optionally with gradient checkpointing.

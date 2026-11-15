@@ -14,7 +14,7 @@ from lightning_fabric.utilities import seed
 from loguru import logger
 
 # Local
-from . import utils
+from . import checkpointing, utils
 from .config import load_config_and_datastores
 from .models import (
     EDM,
@@ -584,6 +584,17 @@ def main(input_args=None):
         "more than one step is unrolled (default: False)",
     )
     parser.add_argument(
+        "--ckpt_policy",
+        type=str,
+        default="auto",
+        choices=checkpointing.CKPT_POLICIES,
+        help="Where to use gradient checkpointing (trade compute for "
+        "memory). auto: as before, around each unroll step when more than one "
+        "step is unrolled (or with --grad_checkpointing); off: never; "
+        "unroll: around every unroll step; internal: around every GNN layer; "
+        "unroll+internal: both, nested (default: auto)",
+    )
+    parser.add_argument(
         "--limit_train_batches",
         type=float,
         default=None,
@@ -842,6 +853,16 @@ def main(input_args=None):
     assert (
         args.config_path is not None
     ), "Specify your config with --config_path"
+    # --grad_checkpointing means step-level checkpointing, which would
+    # contradict policies that exclude it
+    assert not args.grad_checkpointing or args.ckpt_policy in (
+        "auto",
+        "unroll",
+        "unroll+internal",
+    ), (
+        "--grad_checkpointing (checkpoint every unroll step) contradicts "
+        f"--ckpt_policy {args.ckpt_policy}"
+    )
     assert args.model in MODELS, f"Unknown model: {args.model}"
     assert args.eval in (
         None,
@@ -925,6 +946,8 @@ def main(input_args=None):
         statistics_datastore_boundary=statistics_datastore_boundary,
         statistics_datastore_atmosphere=statistics_datastore_atmosphere,
     )
+    # The GNN layers exist now, so the checkpoint policy can be applied to them
+    model.update_checkpointing(args.ar_steps_train)
 
     if args.eval:
         prefix = f"eval-{args.eval}-"
@@ -1098,14 +1121,15 @@ def main(input_args=None):
     def _set_ar_steps(n_steps):
         """Set the training unroll length for a phase.
 
-        Gradient checkpointing at each unroll step is enabled whenever more
-        than one step is unrolled, since the activations kept for backward
-        otherwise scale with the unroll length (a 1-step phase that fits in
-        memory can OOM at 2 steps). ``--grad_checkpointing`` forces it on for
-        every phase, including 1-step ones.
+        With the default ``--ckpt_policy auto``, gradient checkpointing at
+        each unroll step is enabled whenever more than one step is unrolled,
+        since the activations kept for backward otherwise scale with the
+        unroll length (a 1-step phase that fits in memory can OOM at 2 steps).
+        ``--grad_checkpointing`` forces it on for every phase, including 1-step
+        ones. Other policies are applied by ``model.update_checkpointing``.
         """
         data_module.ar_steps_train = n_steps
-        model.grad_checkpointing = args.grad_checkpointing or n_steps > 1
+        model.update_checkpointing(n_steps)
 
     def _run_crps_finetune():
         """Probabilistic (CRPS) fine-tuning of graph_crps, typically from a

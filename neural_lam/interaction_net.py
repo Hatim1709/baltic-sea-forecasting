@@ -4,7 +4,7 @@ import torch_geometric as pyg
 from torch import nn
 
 # Local
-from . import utils
+from . import checkpointing, utils
 
 
 class InteractionNet(pyg.nn.MessagePassing):
@@ -12,6 +12,10 @@ class InteractionNet(pyg.nn.MessagePassing):
     Implementation of a generic Interaction Network,
     from Battaglia et al. (2016)
     """
+
+    # Per-layer gradient checkpointing, off by default. Switched on for all
+    # layers by checkpointing.set_internal_checkpointing (--ckpt_policy).
+    ckpt_inner = False
 
     # pylint: disable=arguments-differ
     # Disable to override args/kwargs from superclass
@@ -104,6 +108,22 @@ class InteractionNet(pyg.nn.MessagePassing):
 
     def forward(self, send_rep, rec_rep, edge_rep, emb=None):
         """
+        Entry point, same arguments and return values as _forward_impl.
+
+        With per-layer checkpointing on (ckpt_inner) the whole layer runs as
+        one checkpointed block: the large per-edge tensors inside it are not
+        kept for backward but recomputed from the layer inputs. The result is
+        identical, only memory and compute change. PropagationNet inherits
+        this method and only replaces _forward_impl.
+        """
+        if checkpointing.internal_active(self):
+            return checkpointing.run_checkpointed(
+                self._forward_impl, send_rep, rec_rep, edge_rep, emb
+            )
+        return self._forward_impl(send_rep, rec_rep, edge_rep, emb)
+
+    def _forward_impl(self, send_rep, rec_rep, edge_rep, emb=None):
+        """
         Apply interaction network to update the representations of receiver
         nodes, and optionally the edge representations.
 
@@ -187,10 +207,12 @@ class PropagationNet(InteractionNet):
             cond_dim=cond_dim,
         )
 
-    def forward(self, send_rep, rec_rep, edge_rep, emb=None):
+    def _forward_impl(self, send_rep, rec_rep, edge_rep, emb=None):
         """
         Apply propagation network to update the representations of receiver
         nodes, and optionally the edge representations.
+        (Called through InteractionNet.forward, which adds the optional
+        per-layer checkpointing.)
 
         send_rep: (N_send, d_h), vector representations of sender nodes
         rec_rep: (N_rec, d_h), vector representations of receiver nodes
@@ -236,6 +258,9 @@ class FlexibleNet(pyg.nn.MessagePassing):
     separate sender, receiver and edge dimensions.
     """
 
+    # Per-layer gradient checkpointing, off by default (see InteractionNet)
+    ckpt_inner = False
+
     def __init__(
         self,
         edge_index,
@@ -277,6 +302,18 @@ class FlexibleNet(pyg.nn.MessagePassing):
         self.aggr_mlp = utils.make_mlp(aggr_mlp_recipe, cond_dim=cond_dim)
 
     def forward(self, send_rep, rec_rep, edge_rep, emb=None):
+        """
+        Entry point, same arguments and return values as _forward_impl.
+        Runs the layer as one checkpointed block if per-layer checkpointing
+        is on (ckpt_inner), see InteractionNet.forward.
+        """
+        if checkpointing.internal_active(self):
+            return checkpointing.run_checkpointed(
+                self._forward_impl, send_rep, rec_rep, edge_rep, emb
+            )
+        return self._forward_impl(send_rep, rec_rep, edge_rep, emb)
+
+    def _forward_impl(self, send_rep, rec_rep, edge_rep, emb=None):
         """
         Apply propagation network to update the representations of receiver
         nodes, and optionally the edge representations.
