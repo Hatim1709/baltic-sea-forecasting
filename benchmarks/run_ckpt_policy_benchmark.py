@@ -44,6 +44,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 POLICIES = ("off", "unroll", "internal", "unroll+internal")
+# Selective checkpointing (SAC) policies; not run by default, add them with
+# --policies. They recompute the same layers as the full variants (the
+# counters are identical); what differs is which operations are recomputed.
+SELECTIVE_POLICIES = ("selective", "unroll+selective")
+ALL_POLICIES = POLICIES + SELECTIVE_POLICIES
 WARMUP = 5  # fixed in StepMeasurements (train_model.py)
 BOOTSTRAP_DRAWS = 10_000
 SUMMARY_FIELDS = (
@@ -171,6 +176,8 @@ def infer_layer_executions(policy, counts, forecast_steps):
         "unroll": (2, 0, forecast_steps),
         "internal": (2, 1, 0),
         "unroll+internal": (3, 2, forecast_steps),
+        "selective": (2, 1, 0),
+        "unroll+selective": (3, 2, forecast_steps),
     }[policy]
     problems = []
     if calls % divisor or calls == 0:
@@ -199,11 +206,17 @@ def audit_launch(rows, item, width, steps, measured):
             break
     if any(row["ckpt_policy"] != policy for row in rows):
         problems.append("recorded ckpt_policy differs from the requested one")
-    want_unroll = policy in ("unroll", "unroll+internal")
-    want_internal = policy in ("internal", "unroll+internal")
+    want_unroll = policy.startswith("unroll")
+    # Recorded per-layer mode: "True", "False" or "selective"
+    want_internal = {
+        "internal": "True",
+        "unroll+internal": "True",
+        "selective": "selective",
+        "unroll+selective": "selective",
+    }.get(policy, "False")
     if any((row["checkpointing"] == "True") != want_unroll for row in rows):
         problems.append("step-level checkpointing flag does not match policy")
-    if any((row["internal_ckpt"] == "True") != want_internal for row in rows):
+    if any(row["internal_ckpt"] != want_internal for row in rows):
         problems.append("per-layer checkpointing flag does not match policy")
 
     measured_rows = rows[WARMUP:]
@@ -606,7 +619,7 @@ def parse_args(argv=None):
         help=f"measured updates per launch (after {WARMUP} warmup)",
     )
     parser.add_argument(
-        "--policies", nargs="+", choices=POLICIES, default=list(POLICIES)
+        "--policies", nargs="+", choices=ALL_POLICIES, default=list(POLICIES)
     )
     parser.add_argument(
         "--seed",
@@ -642,7 +655,9 @@ def parse_args(argv=None):
 def summarize_only(args):
     session = Path(args.summarize_only)
     records = read_csv(session / "launches.csv")
-    policies = [p for p in POLICIES if any(r["policy"] == p for r in records)]
+    policies = [
+        p for p in ALL_POLICIES if any(r["policy"] == p for r in records)
+    ]
     planned = len({r["repeat"] for r in records})
     rows, problems = write_results(session, records, args, policies, planned)
     print(markdown_table(rows))

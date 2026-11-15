@@ -473,3 +473,81 @@ def test_hierarchical_decoder_unchanged_by_checkpointing():
             # Layers only: N blocks, each run once more in backward -> 2N
             assert run.counts["layer_calls"] == 2 * n
             assert run.counts["layer_blocks"] == n
+
+
+@pytest.mark.parametrize(
+    "policy,expected",
+    [
+        ("selective", (False, checkpointing.SELECTIVE)),
+        ("unroll+selective", (True, checkpointing.SELECTIVE)),
+    ],
+)
+def test_selective_policy_flags(policy, expected):
+    assert checkpointing.policy_flags(policy, False, 1) == expected
+
+
+@pytest.mark.parametrize("case_index", range(5))
+def test_selective_results_unchanged(case_index):
+    """Selective checkpointing must not change outputs or gradients"""
+    _, layer, inputs = _make_cases()[case_index]
+    ref_out, ref_in_grads, ref_param_grads = _forward_backward(layer, inputs)
+
+    layer.ckpt_inner = checkpointing.SELECTIVE
+    out, in_grads, param_grads = _forward_backward(layer, inputs)
+    for new, ref in zip(
+        out + in_grads + param_grads, ref_out + ref_in_grads + ref_param_grads
+    ):
+        torch.testing.assert_close(new, ref, rtol=1e-10, atol=1e-12)
+
+
+def _count_ops(layer, inputs):
+    """
+    Number of times each low-level operation runs in one forward+backward,
+    as {op name: count}, measured with a dispatch-level counter.
+    """
+    # Third-party
+    from torch.utils._python_dispatch import TorchDispatchMode
+
+    counts = {}
+
+    class Counter(TorchDispatchMode):
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            counts[str(func)] = counts.get(str(func), 0) + 1
+            return func(*args, **(kwargs or {}))
+
+    with Counter():
+        _forward_backward(layer, inputs)
+    return counts
+
+
+def _matmul_count(counts):
+    """Executions of the forward matrix multiplications (mm/addmm/bmm)"""
+    names = {str(op) for op in checkpointing.SAVED_OPS}
+    return sum(n for name, n in counts.items() if name in names)
+
+
+@pytest.mark.parametrize("case_index", range(5))
+def test_selective_saves_matmuls_but_recomputes_cheap_ops(case_index):
+    """
+    Plain: every operation runs once in the forward pass. Full per-layer
+    checkpointing: the forward matmuls run twice. Selective: the forward
+    matmuls run only once (their results are kept) while the cheap
+    operations (the LayerNorm) are still recomputed.
+    """
+    _, layer, inputs = _make_cases()[case_index]
+    plain = _count_ops(layer, inputs)
+
+    layer.ckpt_inner = True
+    full = _count_ops(layer, inputs)
+
+    layer.ckpt_inner = checkpointing.SELECTIVE
+    selective = _count_ops(layer, inputs)
+
+    # backward matmuls are counted in all three runs; the difference between
+    # runs is exactly the recomputed forward matmuls
+    assert _matmul_count(selective) == _matmul_count(plain)
+    assert _matmul_count(full) > _matmul_count(plain)
+
+    norm = "aten.native_layer_norm.default"
+    assert full[norm] == 2 * plain[norm]
+    assert selective[norm] == 2 * plain[norm]

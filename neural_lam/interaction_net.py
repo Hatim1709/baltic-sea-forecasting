@@ -118,7 +118,12 @@ class InteractionNet(pyg.nn.MessagePassing):
         """
         if checkpointing.internal_active(self):
             return checkpointing.run_checkpointed(
-                self._run_layer, send_rep, rec_rep, edge_rep, emb
+                self._run_layer,
+                send_rep,
+                rec_rep,
+                edge_rep,
+                emb,
+                selective=self.ckpt_inner == checkpointing.SELECTIVE,
             )
         return self._run_layer(send_rep, rec_rep, edge_rep, emb)
 
@@ -314,7 +319,12 @@ class FlexibleNet(pyg.nn.MessagePassing):
         """
         if checkpointing.internal_active(self):
             return checkpointing.run_checkpointed(
-                self._run_layer, send_rep, rec_rep, edge_rep, emb
+                self._run_layer,
+                send_rep,
+                rec_rep,
+                edge_rep,
+                emb,
+                selective=self.ckpt_inner == checkpointing.SELECTIVE,
             )
         return self._run_layer(send_rep, rec_rep, edge_rep, emb)
 

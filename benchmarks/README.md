@@ -61,3 +61,19 @@ version, GPU, plan) and the per-launch logs/CSVs.
 * Default policy `auto` (no `--ckpt_policy`) behaves exactly as before.
 * Nothing here has been run on a GPU yet; the tests (`tests/test_checkpoint_policy.py`,
   `tests/test_ckpt_benchmark.py`) run on CPU with a fake training program.
+
+## Selective checkpointing (SAC) and torch.compile
+
+Two more policies exist: `selective` and `unroll+selective`. Per GNN layer they
+keep the results of the matrix multiplications (the Linear layers) and
+recompute only the cheap operations (gathers, concatenation, SiLU, LayerNorm,
+summing over edges). Expect time between `off` and `internal`, memory between
+`internal` and `off`. Add them to the benchmark with
+`--policies off internal selective unroll unroll+selective`.
+
+`compile_budget_probe.py` is a quick one-GPU check (single layer) of eager vs.
+the two layer checkpointing modes vs. `torch.compile` with
+`activation_memory_budget` 1.0 / 0.5 / 0.0. It prints time, peak memory and
+gradient agreement, and reports compile failures instead of crashing. Run it
+first to decide whether a whole-model compile comparison is worthwhile:
+`PYTHONPATH=. python benchmarks/compile_budget_probe.py --nodes 200000 --edges 1200000 --dim 512`

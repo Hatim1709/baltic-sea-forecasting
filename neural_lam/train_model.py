@@ -111,9 +111,14 @@ class StepMeasurements(pl.Callback):
         counts = checkpointing.get_counts()
         loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
         loss = float(loss.detach()) if torch.is_tensor(loss) else ""
-        internal = any(
+        # "False", "True" (full per-layer) or "selective"
+        modes = {
             getattr(module, "ckpt_inner", False) for module in model.modules()
-        )
+        }
+        if checkpointing.SELECTIVE in modes:
+            internal = checkpointing.SELECTIVE
+        else:
+            internal = True in modes
         with open(self.csv_path, "a", newline="") as file:
             csv.writer(file).writerow([
                 self.completed,
@@ -672,7 +677,10 @@ def main(input_args=None):
         "memory). auto: as before, around each unroll step when more than one "
         "step is unrolled (or with --grad_checkpointing); off: never; "
         "unroll: around every unroll step; internal: around every GNN layer; "
-        "unroll+internal: both, nested (default: auto)",
+        "unroll+internal: both, nested; selective: per GNN layer, but keep "
+        "the matrix-multiplication results and recompute only cheap "
+        "operations (selective checkpointing); unroll+selective: step-level "
+        "plus selective layers (default: auto)",
     )
     parser.add_argument(
         "--limit_train_batches",
@@ -939,6 +947,7 @@ def main(input_args=None):
         "auto",
         "unroll",
         "unroll+internal",
+        "unroll+selective",
     ), (
         "--grad_checkpointing (checkpoint every unroll step) contradicts "
         f"--ckpt_policy {args.ckpt_policy}"

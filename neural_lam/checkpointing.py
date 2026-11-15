@@ -30,16 +30,43 @@ Policies (the value of ``--ckpt_policy``)
 ``internal``         Per-GNN-layer checkpointing only.
 ``unroll+internal``  Both, nested. Smallest memory, but the forward pass is
                      recomputed twice, so the slowest.
+``selective``        Like ``internal``, but with *selective* activation
+                     checkpointing (SAC, PyTorch >= 2.5): inside each GNN layer
+                     the outputs of the expensive matrix multiplications (the
+                     Linear layers of the edge/node MLPs) are KEPT, and only
+                     the cheap operations (gathering node values onto edges,
+                     concatenation, SiLU, LayerNorm, summing over edges) are
+                     recomputed. Less recompute time than ``internal``, more
+                     memory.
+``unroll+selective`` Step-level checkpointing with the selective layers nested.
 
 Checkpointing is only ever active while training with gradients enabled, never
 in evaluation or under ``torch.no_grad()``.
 """
 
+# Standard library
+from functools import partial
+
 # Third-party
 import torch
 import torch.utils.checkpoint
+from torch.utils.checkpoint import (
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
-CKPT_POLICIES = ("auto", "off", "unroll", "internal", "unroll+internal")
+CKPT_POLICIES = (
+    "auto",
+    "off",
+    "unroll",
+    "internal",
+    "unroll+internal",
+    "selective",
+    "unroll+selective",
+)
+# Value of a layer's ``ckpt_inner`` switch for selective checkpointing
+# (plain True means ordinary full per-layer checkpointing)
+SELECTIVE = "selective"
 
 # policy -> (unroll checkpointing, internal checkpointing); "auto" is special
 _FIXED_POLICIES = {
@@ -47,6 +74,8 @@ _FIXED_POLICIES = {
     "unroll": (True, False),
     "internal": (False, True),
     "unroll+internal": (True, True),
+    "selective": (False, SELECTIVE),
+    "unroll+selective": (True, SELECTIVE),
 }
 
 
@@ -60,7 +89,8 @@ def policy_flags(policy, force_unroll, ar_steps_train):
     ar_steps_train: number of unrolled steps in the current training phase
 
     Returns:
-    (unroll, internal): booleans, step-level and per-layer checkpointing
+    (unroll, internal): step-level switch (bool) and per-layer switch (False,
+    True for full layer checkpointing, or SELECTIVE)
     """
     if policy == "auto":
         return bool(force_unroll) or ar_steps_train > 1, False
@@ -111,19 +141,48 @@ def internal_active(module):
     return module.ckpt_inner and module.training and torch.is_grad_enabled()
 
 
-def run_checkpointed(func, *args):
+# Operations whose results are kept (not recomputed) by selective
+# checkpointing: the matrix multiplications behind every torch.nn.Linear. They
+# dominate the compute of a GNN layer, while everything else (index gathers,
+# concatenation, SiLU, LayerNorm, scatter-sum) is cheap to redo.
+_aten = torch.ops.aten
+SAVED_OPS = (_aten.mm.default, _aten.addmm.default, _aten.bmm.default)
+
+
+def selective_policy(ctx, op, *args, **kwargs):
+    """
+    Decide per operation whether SAC keeps its result or recomputes it
+    (this is the ``policy_fn`` of PyTorch's SAC API).
+    """
+    if op in SAVED_OPS:
+        return CheckpointPolicy.MUST_SAVE
+    return CheckpointPolicy.PREFER_RECOMPUTE
+
+
+def run_checkpointed(func, *args, selective=False):
     """
     Call func(*args) as a checkpointed block: its internal values are not kept
     for backward but recomputed from args when needed. The non-reentrant
     variant is used, as recommended by PyTorch and as in ARModel.
+
+    selective: if True, use selective checkpointing: results of the
+        operations in SAVED_OPS are kept, all others recomputed.
     """
     _COUNTS["layer_blocks"] += 1
-    return torch.utils.checkpoint.checkpoint(func, *args, use_reentrant=False)
+    extra = {}
+    if selective:
+        extra["context_fn"] = partial(
+            create_selective_checkpoint_contexts, selective_policy
+        )
+    return torch.utils.checkpoint.checkpoint(
+        func, *args, use_reentrant=False, **extra
+    )
 
 
 def set_internal_checkpointing(root, enabled):
     """
-    Switch per-layer checkpointing on or off for every GNN layer below `root`.
+    Switch per-layer checkpointing (off, on, or SELECTIVE) for every GNN layer
+    below `root`.
 
     Only the layer classes define the attribute ``ckpt_inner``, so this finds
     exactly those. Returns the number of layers that were switched.
@@ -131,6 +190,9 @@ def set_internal_checkpointing(root, enabled):
     count = 0
     for module in root.modules():
         if hasattr(module, "ckpt_inner"):
-            module.ckpt_inner = bool(enabled)
+            # False / True / SELECTIVE (see run_checkpointed)
+            module.ckpt_inner = (
+                SELECTIVE if enabled == SELECTIVE else bool(enabled)
+            )
             count += 1
     return count
