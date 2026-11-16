@@ -7,6 +7,7 @@ writes.
 
 # Standard library
 import csv
+import errno
 import importlib.util
 import sys
 import textwrap
@@ -271,3 +272,21 @@ def test_step_measurements_writes_policy_columns(tmp_path, monkeypatch):
     assert rows[1]["layer_calls"] == "1"
     assert float(rows[1]["allocated_mib"]) == 7.0
     assert float(rows[1]["loss"]) == 0.5
+
+
+def test_full_session_collects_csv_across_filesystems(tmp_path, monkeypatch):
+    """CSV collection survives EXDEV between scratch and home."""
+    attempts = []
+
+    def cross_device_rename(source, destination):
+        attempts.append((source, destination))
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(bench.shutil.os, "rename", cross_device_rename)
+    session, work = run_fake_session(tmp_path, "ok")
+    launches = read(session / "launches.csv")
+    assert len(attempts) == 8
+    assert len(launches) == 8
+    assert all(row["status"] == "completed" for row in launches)
+    assert len(list(session.glob("*/step-measurements-*.csv"))) == 8
+    assert not list(work.glob("step-measurements-*.csv"))
