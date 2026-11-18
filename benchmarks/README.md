@@ -43,6 +43,30 @@ Repeat with `--steps 4` and `--steps 6` to compare with the earlier ON/OFF
 scaling study (use the same `--width`). To find where `off` stops fitting, add
 larger `--steps`; the OOM launches are recorded.
 
+
+## Continue after interrupted CSV collection
+
+CSV collection supports separate work and output filesystems, such as
+`/scratch` and `/home`. For an existing session whose training completed before
+CSV collection failed, first recover and audit it on the login node:
+
+```bash
+python benchmarks/resume_ckpt_policy_benchmark.py /path/to/session --dry_run
+```
+
+Then run the same command without `--dry_run` inside a one-GPU allocation.
+It restores arguments from `manifest.json`, preserves the original schedule,
+and skips launches already in its recovery journal. A recovered launch requires
+a complete CSV that passes the policy and finite-loss checks, an identical
+training command, and an explicit training-completion log. An incomplete
+launch requires inspection.
+
+Recovery leaves the original exit code and whole-process duration unknown.
+Each recovered launch has a `recovery.json`, and each continuation records
+placement and software provenance. Review this allocation information when
+interpreting comparisons whose repeats span the interruption. The original
+manifest remains the record of the initial collection.
+
 ## What to send back
 
 The whole session folder `ckpt_policy_runs/ckpt_policy_<timestamp>/`:
