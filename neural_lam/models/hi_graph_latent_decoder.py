@@ -2,12 +2,7 @@
 from torch import nn
 
 # First-party
-from neural_lam import utils
-from neural_lam.interaction_net import (
-    FlexibleNet,
-    InteractionNet,
-    PropagationNet,
-)
+from neural_lam.attention_sites import SiteBuilder
 from neural_lam.models.base_graph_latent_decoder import BaseGraphLatentDecoder
 
 
@@ -37,6 +32,8 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
         num_interior_nodes=None,
         intra_layer_type="interaction",
         attention_heads=None,
+        attention_sites=(),
+        attention_edge_mode="key_value",
     ):
         super().__init__(
             hidden_dim,
@@ -47,51 +44,45 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
             output_std,
         )
 
-        # GNN from grid to mesh
-        self.g2m_gnn = FlexibleNet(
-            edge_index=g2m_edge_index,
-            send_node_dim=hidden_dim_grid,
-            rec_node_dim=hidden_dim_mesh_nodes,
-            edge_dim=hidden_dim_edge,
+        # Builds the original layers, or attention at the sites listed in
+        # attention_sites ("decoder.g2m", "decoder.intra", ...)
+        sites = SiteBuilder(
+            "decoder",
             hidden_layers=hidden_layers,
+            attention_sites=attention_sites,
+            attention_heads=attention_heads,
+            attention_edge_mode=attention_edge_mode,
+        )
+
+        # GNN from grid to mesh
+        self.g2m_gnn = sites.g2m(
+            g2m_edge_index,
+            send_dim=hidden_dim_grid,
+            rec_dim=hidden_dim_mesh_nodes,
+            edge_dim=hidden_dim_edge,
             num_rec=num_grid_con_mesh_nodes,
-            propagation=True,
-            aggr="mean",
         )
         # GNN from mesh to grid
-        self.m2g_gnn = FlexibleNet(
-            edge_index=m2g_edge_index,
-            send_node_dim=hidden_dim_grid,
-            rec_node_dim=hidden_dim_grid,
+        self.m2g_gnn = sites.m2g(
+            m2g_edge_index,
+            send_dim=hidden_dim_grid,
+            rec_dim=hidden_dim_grid,
             edge_dim=hidden_dim_edge,
-            hidden_layers=hidden_layers,
             num_rec=num_interior_nodes,
-            propagation=False,
-            aggr="sum",
         )
 
         # GNNs going up through mesh levels
+        # Note: By default we keep these as InteractionNets
         self.mesh_up_gnns = nn.ModuleList(
             [
-                # Note: We keep these as InteractionNets
-                InteractionNet(
-                    edge_index,
-                    hidden_dim,
-                    hidden_layers=hidden_layers,
-                    update_edges=False,
-                )
+                sites.up(edge_index, hidden_dim)
                 for edge_index in mesh_up_edge_index
             ]
         )
         # GNNs going down through mesh levels
         self.mesh_down_gnns = nn.ModuleList(
             [
-                PropagationNet(
-                    edge_index,
-                    hidden_dim,
-                    hidden_layers=hidden_layers,
-                    update_edges=False,
-                )
+                sites.down(edge_index, hidden_dim)
                 for edge_index in mesh_down_edge_index
             ]
         )
@@ -99,20 +90,24 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
         # Identity mappings if intra_level_layers = 0
         self.intra_up_gnns = nn.ModuleList(
             [
-                utils.make_gnn_seq(
-                    edge_index, intra_level_layers, hidden_layers, hidden_dim,
+                sites.intra(
+                    edge_index,
+                    intra_level_layers,
+                    hidden_dim,
                     layer_type=intra_layer_type,
-                    attention_heads=attention_heads,
+                    layer_heads=attention_heads,
                 )
                 for edge_index in m2m_edge_index
             ]
         )
         self.intra_down_gnns = nn.ModuleList(
             [
-                utils.make_gnn_seq(
-                    edge_index, intra_level_layers, hidden_layers, hidden_dim,
+                sites.intra(
+                    edge_index,
+                    intra_level_layers,
+                    hidden_dim,
                     layer_type=intra_layer_type,
-                    attention_heads=attention_heads,
+                    layer_heads=attention_heads,
                 )
                 for edge_index in list(m2m_edge_index)[:-1]
                 # Not needed for level L
