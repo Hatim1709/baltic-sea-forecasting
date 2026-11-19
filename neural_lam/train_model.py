@@ -29,6 +29,10 @@ from .models import (
 )
 from .models.flow_map import add_flow_map_args
 from .weather_dataset import WeatherDataModule
+from .sparse_attention import INTRA_LAYER_TYPES
+from .attention_sites import SITE_CHOICES
+from .bipartite_attention import EDGE_MODES
+
 
 MODELS = {
     "graphcast": GraphCast,
@@ -218,6 +222,38 @@ def main(input_args=None):
         default="sum",
         help="Aggregation to use for m2m processor GNN layers (sum/mean) "
         "(default: sum)",
+    )
+    parser.add_argument(
+        "--decoder_intra_layer",
+        type=str,
+        default="interaction",
+        choices=INTRA_LAYER_TYPES,
+        help="Layer type for the same-level (intra-level) GNN layers of the "
+        "GraphEFM hierarchical decoder (default: interaction)",
+    )
+    parser.add_argument(
+        "--attention_heads",
+        type=int,
+        default=None,
+        help="Number of attention heads for attention intra-level layers",
+    )
+    parser.add_argument(
+        "--attention_sites",
+        type=str,
+        nargs="*",
+        default=[],
+        choices=SITE_CHOICES,
+        help="GraphEFM sites that use sparse attention instead of the "
+        "original GNN layer, e.g. decoder.g2m prior.up, or all. Needs "
+        "--attention_heads (default: none)",
+    )
+    parser.add_argument(
+        "--attention_edge_mode",
+        type=str,
+        default="key_value",
+        choices=EDGE_MODES,
+        help="How edge features enter attention at --attention_sites: added "
+        "to keys and values, or as a per-head score bias (default: key_value)",
     )
     parser.add_argument(
         "--output_std",
@@ -848,6 +884,13 @@ def main(input_args=None):
         "val",
         "test",
     ), f"Unknown eval setting: {args.eval}"
+
+    assert args.decoder_intra_layer == "interaction" or args.model == "graph_efm", (
+        "--decoder_intra_layer is only implemented for --model graph_efm"
+    )
+    assert not args.attention_sites or args.model == "graph_efm", (
+        "--attention_sites is only implemented for --model graph_efm"
+    )
 
     # Get an (actual) random run id as a unique identifier
     random_run_id = random.randint(0, 9999)

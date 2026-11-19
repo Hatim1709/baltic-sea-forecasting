@@ -3,7 +3,7 @@ from torch import nn
 
 # First-party
 from neural_lam import utils
-from neural_lam.interaction_net import FlexibleNet, PropagationNet
+from neural_lam.attention_sites import SiteBuilder
 from neural_lam.models.base_latent_encoder import BaseLatentEncoder
 
 
@@ -28,6 +28,10 @@ class HiGraphLatentEncoder(BaseLatentEncoder):
         hidden_layers=1,
         output_dist="isotropic",
         num_grid_con_mesh_nodes=None,
+        submodel="encoder",
+        attention_sites=(),
+        attention_heads=None,
+        attention_edge_mode="key_value",
     ):
         super().__init__(
             latent_dim,
@@ -38,27 +42,30 @@ class HiGraphLatentEncoder(BaseLatentEncoder):
             f"HiGraphLatentEncoder hidden_dim: {hidden_dim}, "
             f"hidden_dim_grid: {hidden_dim_grid}"
         )
-        # GNN from grid to mesh
-        self.g2m_gnn = FlexibleNet(
-            edge_index=g2m_edge_index,
-            send_node_dim=hidden_dim_grid,
-            rec_node_dim=hidden_dim_mesh_nodes,
-            edge_dim=hidden_dim_edge,
+        # Builds the original layers, or attention at the sites listed in
+        # attention_sites. This class is used both as the prior and as the
+        # encoder, with site names "prior.*" and "encoder.*" respectively.
+        sites = SiteBuilder(
+            submodel,
             hidden_layers=hidden_layers,
+            attention_sites=attention_sites,
+            attention_heads=attention_heads,
+            attention_edge_mode=attention_edge_mode,
+        )
+
+        # GNN from grid to mesh
+        self.g2m_gnn = sites.g2m(
+            g2m_edge_index,
+            send_dim=hidden_dim_grid,
+            rec_dim=hidden_dim_mesh_nodes,
+            edge_dim=hidden_dim_edge,
             num_rec=num_grid_con_mesh_nodes,
-            propagation=True,
-            aggr="mean",
         )
 
         # GNNs going up through mesh levels
         self.mesh_up_gnns = nn.ModuleList(
             [
-                PropagationNet(
-                    edge_index,
-                    hidden_dim,
-                    hidden_layers=hidden_layers,
-                    update_edges=False,
-                )
+                sites.up(edge_index, hidden_dim)
                 for edge_index in mesh_up_edge_index
             ]
         )
@@ -67,9 +74,7 @@ class HiGraphLatentEncoder(BaseLatentEncoder):
         # Identity mappings if intra_level_layers = 0
         self.intra_level_gnns = nn.ModuleList(
             [
-                utils.make_gnn_seq(
-                    edge_index, intra_level_layers, hidden_layers, hidden_dim
-                )
+                sites.intra(edge_index, intra_level_layers, hidden_dim)
                 for edge_index in m2m_edge_index
             ]
         )
