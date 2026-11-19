@@ -36,6 +36,7 @@ import os
 import random
 import shlex
 import signal
+import shutil
 import statistics
 import subprocess
 import sys
@@ -462,7 +463,7 @@ def run_launch(item, args, session):
 
     new_csvs = sorted(set(workdir.glob("step-measurements-*.csv")) - before)
     for path in new_csvs:  # keep each launch's CSV with its log
-        path.replace(run_dir / path.name)
+        shutil.move(str(path), str(run_dir / path.name))
     if record["status"] == "timeout":
         return record
     if record["returncode"] != 0:
