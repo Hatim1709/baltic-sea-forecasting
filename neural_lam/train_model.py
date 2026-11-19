@@ -16,6 +16,7 @@ from loguru import logger
 # Local
 from . import utils
 from .config import load_config_and_datastores
+from .last_checkpoint import LastCheckpoint
 from .models import (
     EDM,
     FM,
@@ -970,12 +971,9 @@ def main(input_args=None):
     # Lightning save at validation end rather than at train epoch end)
     # last.ckpt would lag up to val_interval epochs behind, and restarting a
     # stage would silently redo that training.
-    last_ckpt_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=f"saved_models/{run_name}",
-        save_top_k=0,
-        save_last=True,
-        save_on_train_epoch_end=True,
-    )
+    # ModelCheckpoint(save_top_k=0, save_last=True) does not save at epoch end
+    # with pytorch-lightning 2.6.0 (see LastCheckpoint), hence the own class.
+    last_ckpt_callback = LastCheckpoint(dirpath=f"saved_models/{run_name}")
     callbacks.append(last_ckpt_callback)
     # Log the LR to the training logger, so that a mis-restored schedule after
     # a restart is visible instead of only showing up as a worse loss.
