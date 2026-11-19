@@ -93,7 +93,7 @@ def reference_forward(layer, nodes, edges, edge_index):
 
 
 def loss_fn(output, target):
-    weights = torch.linspace(0.5, 1.5, output.shape[-1])
+    weights = torch.linspace(0.5, 1.5, output.shape[-1], device=output.device)
     return ((output - target) ** 2 * weights).mean()
 
 
