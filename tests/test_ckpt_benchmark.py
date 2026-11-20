@@ -195,6 +195,7 @@ def run_fake_session(tmp_path, mode):
             "4",
             "--timeout",
             "60",
+            "--skip_reference_check",
         ]
     )
     (session,) = list(out.iterdir())
@@ -271,3 +272,56 @@ def test_step_measurements_writes_policy_columns(tmp_path, monkeypatch):
     assert rows[1]["layer_calls"] == "1"
     assert float(rows[1]["allocated_mib"]) == 7.0
     assert float(rows[1]["loss"]) == 0.5
+
+
+# ---------------------------------------------------- reference workload
+
+REFERENCE = bench.find_reference(None, SCRIPT.parents[1]) or Path("missing")
+
+
+def test_run_length_matches_reference_short_run():
+    assert bench.run_length(20) == (5, 5)  # 25 updates, as --short
+    assert bench.run_length(4) == (1, bench.WARMUP + 4)
+
+
+def test_without_flag_removes_flag_and_value():
+    tokens = ["--a", "1", "--ckpt_policy", "off", "--b", "2"]
+    assert bench.without_flag(tokens, "--ckpt_policy") == ["--a", "1", "--b", "2"]
+    assert bench.without_flag(["--x"], "--x") == []
+
+
+def test_find_reference_prefers_explicit_path(tmp_path):
+    ref = tmp_path / "reference_workload.py"
+    ref.write_text("")
+    assert bench.find_reference(str(ref), tmp_path) == ref.resolve()
+
+
+def test_preflight_exit_codes():
+    sys.path.insert(0, str(SCRIPT.parent))
+    import preflight
+
+    assert preflight.exit_code([(preflight.OK, "x")]) == 0
+    assert preflight.exit_code([(preflight.COMPILE_FAIL, "x")]) == 2
+    assert preflight.exit_code(
+        [(preflight.COMPILE_FAIL, "x"), (preflight.FAIL, "y")]
+    ) == 1
+
+
+@pytest.mark.skipif(not REFERENCE.is_file(), reason="project repo not here")
+def test_reference_check_accepts_defaults_and_rejects_changes():
+    module = bench.load_reference(REFERENCE)
+
+    def args(**kw):
+        ns = bench.parse_args(["--dry_run"])
+        for key, value in kw.items():
+            setattr(ns, key, value)
+        return ns
+
+    ok, _ = bench.check_reference(module, args(), "off")
+    assert ok
+    ok, _ = bench.check_reference(module, args(steps=4, width=2048), "selective")
+    assert ok  # width and steps are study settings
+    ok, text = bench.check_reference(
+        module, args(extra_args="--precision 32"), "off"
+    )
+    assert not ok and "--precision" in text

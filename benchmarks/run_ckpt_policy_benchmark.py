@@ -24,13 +24,28 @@ What it does
 Out-of-memory launches are recorded (status "oom") and the sweep continues:
 "this policy does not fit" is a result. Any other failure is recorded too.
 
+Shared reference workload
+-------------------------
+All tracks of the project measure on the same workload (GraphEFM, hierarchical
+graph, d=1024, T=2, bf16, CRPS 0, latent 16). Before anything starts, this
+script compares its training command with the project's
+experiments/reference_workload.py (the same `compare` that its `--check` uses)
+and refuses to run if the workload differs. The checkpoint policy is the study
+setting here, so `--ckpt_policy` is left out of that comparison. The file is
+found automatically in ~/njord-dphpc, or pass `--reference PATH`.
+
 It never edits source files and needs exactly one visible GPU.
-Run `--dry_run` first to see the plan and commands without starting anything.
+Run `--dry_run` first to see the plan and commands without starting anything
+(it also runs the reference check and needs neither a GPU nor torch).
 """
 
 # Standard library
 import argparse
+import contextlib
 import csv
+import importlib.metadata
+import importlib.util
+import io
 import json
 import os
 import random
@@ -132,22 +147,125 @@ def build_plan(policies, launches, seed):
     return plan
 
 
+def run_length(measured):
+    """
+    (epochs, batches per epoch) giving `WARMUP + measured` updates. The
+    reference short run (5 warmup + 20 measured = 25 updates) is 5 x 5, exactly
+    as `reference_workload.py --short` prints it; other lengths use one epoch.
+    """
+    total = WARMUP + measured
+    return (5, 5) if total == 25 else (1, total)
+
+
 def training_args(width, steps, policy, measured, extra_args=""):
     """
     Command-line arguments of neural_lam.train_model for one launch.
     Widths follow the width study: D / D/2 / D/2 / D/4 for the main, grid,
-    mesh-node and edge features. One epoch of `WARMUP + measured` updates.
+    mesh-node and edge features. `WARMUP + measured` updates in total.
     """
+    epochs, batches = run_length(measured)
     args = list(COMMON)
     args += ["--hidden_dim", str(width)]
     args += ["--hidden_dim_grid", str(width // 2)]
     args += ["--hidden_dim_mesh_nodes", str(width // 2)]
     args += ["--hidden_dim_edge", str(width // 4)]
     args += ["--ar_steps_train", str(steps)]
-    args += ["--epochs", "1"]
-    args += ["--limit_train_batches", str(WARMUP + measured)]
+    args += ["--epochs", str(epochs)]
+    args += ["--limit_train_batches", str(batches)]
     args += ["--ckpt_policy", policy]
     return args + shlex.split(extra_args)
+
+
+# ------------------------------------------------- reference workload check
+
+REFERENCE_NAME = "reference_workload.py"
+
+
+def find_reference(explicit, source):
+    """
+    Locate experiments/reference_workload.py of the project repository
+    (njord-dphpc). Order: --reference, $NJORD_REFERENCE_WORKLOAD, the project
+    checkout around a submodule checkout (<project>/external/njord), and
+    ~/njord-dphpc. Returns a Path or None.
+    """
+    parents = Path(source).resolve().parents
+    candidates = [
+        explicit,
+        os.environ.get("NJORD_REFERENCE_WORKLOAD"),
+        parents[1] / "experiments" / REFERENCE_NAME
+        if len(parents) > 1
+        else None,
+        Path.home() / "njord-dphpc" / "experiments" / REFERENCE_NAME,
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).expanduser().is_file():
+            return Path(candidate).expanduser().resolve()
+    return None
+
+
+def load_reference(path):
+    """Import reference_workload.py (standard library only) from its path"""
+    spec = importlib.util.spec_from_file_location(
+        "reference_workload", str(path)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def without_flag(tokens, flag):
+    """`tokens` without `flag` and its value (a value never starts with --)"""
+    kept, index = [], 0
+    while index < len(tokens):
+        if tokens[index] == flag:
+            index += 1
+            if index < len(tokens) and not tokens[index].startswith("--"):
+                index += 1
+            continue
+        kept.append(tokens[index])
+        index += 1
+    return kept
+
+
+def check_reference(module, args, policy):
+    """
+    Compare the command of one launch with the project's reference workload.
+    Returns (same_workload, report_text). The checkpoint policy is this
+    benchmark's study setting, so --ckpt_policy is left out of the comparison.
+    """
+    candidate = without_flag(
+        training_args(
+            args.width, args.steps, policy, args.measured, args.extra_args
+        ),
+        "--ckpt_policy",
+    )
+    try:
+        reference = module.reference_args(
+            args.width,
+            args.steps,
+            checkpointing=False,
+            short=WARMUP + args.measured == 25,
+        )
+    except ValueError as error:  # e.g. a width that is not a multiple of 4
+        return False, f"Cannot build the reference command: {error}"
+    result = module.compare(candidate, reference=reference)
+    # The reference warns that leaving out --grad_checkpointing still
+    # checkpoints multi-step runs at the pinned commit. Here --ckpt_policy
+    # decides, and the audit of the event counters proves what really ran.
+    result["notes"] = [
+        note
+        for note in result["notes"]
+        if not note.startswith("No --grad_checkpointing")
+    ]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        module.print_report(result)
+    text = (
+        buffer.getvalue().rstrip()
+        + "\nCheckpointing is set by --ckpt_policy (not --grad_checkpointing);"
+        " every launch is audited with the event counters."
+    )
+    return not result["workload"], text
 
 
 # ------------------------------------------------------------------ audit
@@ -362,16 +480,37 @@ def capture(command, **kwargs):
         return {"error": str(error)}
 
 
-def provenance(source):
+def torch_version():
+    """Installed torch version, or None (read without importing torch)"""
+    try:
+        return importlib.metadata.version("torch")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def provenance(source, reference_path=None):
     """Read-only record of the code and hardware that produced the results"""
     git = ["git", "-C", str(source)]
-    return {
+    record = {
         "time": utcnow(),
         "python": sys.version,
+        "torch": torch_version(),
         "source": str(source),
         "git_sha": capture(git + ["rev-parse", "HEAD"]),
         "git_branch": capture(git + ["branch", "--show-current"]),
         "git_status": capture(git + ["status", "--porcelain"]),
+        "reference_workload_file": str(reference_path)
+        if reference_path
+        else None,
+    }
+    if reference_path:  # project repository (njord-dphpc) that defines it
+        project = ["git", "-C", str(Path(reference_path).parent)]
+        record["project_git_sha"] = capture(project + ["rev-parse", "HEAD"])
+        record["project_git_status"] = capture(
+            project + ["status", "--porcelain"]
+        )
+    return {
+        **record,
         "gpu": capture(
             [
                 "nvidia-smi",
@@ -640,9 +779,27 @@ def parse_args(argv=None):
         help="further train_model arguments, as one string",
     )
     parser.add_argument(
+        "--reference",
+        metavar="PATH",
+        help="experiments/reference_workload.py of the project repository "
+        "(njord-dphpc); found automatically in ~/njord-dphpc if omitted",
+    )
+    parser.add_argument(
+        "--skip_reference_check",
+        action="store_true",
+        help="do not compare with the reference workload (results are then "
+        "NOT comparable with the shared baseline)",
+    )
+    parser.add_argument(
+        "--allow_different_workload",
+        action="store_true",
+        help="run even if the reference check reports workload differences "
+        "(results are then NOT comparable with the shared baseline)",
+    )
+    parser.add_argument(
         "--dry_run",
         action="store_true",
-        help="print the plan and commands, run nothing",
+        help="print the plan, commands and reference check, run nothing",
     )
     parser.add_argument(
         "--summarize_only",
@@ -671,6 +828,30 @@ def main(argv=None):
         return summarize_only(args)
     if not args.workdir and not args.dry_run:
         raise SystemExit("--workdir is required")
+    reference_path, reference_report, same_workload = None, None, None
+    if not args.skip_reference_check:
+        reference_path = find_reference(args.reference, args.source)
+        if reference_path is None:
+            message = (
+                f"{REFERENCE_NAME} (project repository njord-dphpc) not found."
+                " Pull the project's main branch into ~/njord-dphpc, pass"
+                " --reference PATH, or --skip_reference_check"
+            )
+            if not args.dry_run:
+                raise SystemExit("ERROR: " + message)
+            print("WARNING:", message, "\n")
+        else:
+            same_workload, reference_report = check_reference(
+                load_reference(reference_path), args, args.policies[0]
+            )
+            print(f"Reference workload check ({reference_path}):")
+            print(reference_report, "\n", flush=True)
+            if not same_workload and not args.allow_different_workload:
+                raise SystemExit(
+                    "Stopping: not the shared reference workload, so the"
+                    " numbers would not be comparable. Fix the flags (see"
+                    " above) or pass --allow_different_workload."
+                )
     plan = build_plan(args.policies, args.launches, args.seed)
     if args.dry_run:
         for item in plan:
@@ -694,7 +875,11 @@ def main(argv=None):
             {
                 "args": vars(args),
                 "plan": plan,
-                "provenance": provenance(Path(args.source)),
+                "reference_check": {
+                    "same_workload": same_workload,
+                    "report": reference_report,
+                },
+                "provenance": provenance(Path(args.source), reference_path),
             },
             indent=2,
             default=str,
@@ -702,6 +887,10 @@ def main(argv=None):
         + "\n",
         encoding="utf-8",
     )
+    if reference_report:
+        (session / "reference_check.txt").write_text(
+            reference_report + "\n", encoding="utf-8"
+        )
     print("Session folder:", session, flush=True)
 
     records = []
@@ -726,9 +915,17 @@ def main(argv=None):
     print(markdown_table(rows))
     for problem in problems:
         print("SESSION PROBLEM:", problem)
+    # "oom" is a result ("does not fit"), the other failures are not
+    bad = [
+        r["run"]
+        for r in records
+        if r["status"] in ("failed", "timeout", "audit_failed")
+    ]
+    if bad:
+        print("LAUNCHES TO CHECK (failed, timeout or audit_failed):", *bad)
     print("Results folder to share:", session)
-    return None
+    return 1 if bad or problems else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

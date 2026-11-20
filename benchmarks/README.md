@@ -77,3 +77,33 @@ the two layer checkpointing modes vs. `torch.compile` with
 gradient agreement, and reports compile failures instead of crashing. Run it
 first to decide whether a whole-model compile comparison is worthwhile:
 `PYTHONPATH=. python benchmarks/compile_budget_probe.py --nodes 200000 --edges 1200000 --dim 512`
+
+## Steps 1-3 in one job (Hatim: only this is needed)
+
+One script does preflight, the compile probe, and the benchmark at T=2, 4, 6 on
+the shared reference workload (d=1024, bf16, CRPS 0, latent 16). It refuses to
+start if the workload differs from `experiments/reference_workload.py`.
+
+```bash
+# project repo: get the reference workload (once)
+cd ~/njord-dphpc && git switch main && git pull
+
+# fork checkout: get the code
+cd ~/njord-dphpc/external/njord
+git fetch origin && git switch nils && git pull --ff-only
+
+# no GPU needed: shows the plan and runs the reference check
+DRY_RUN=1 bash benchmarks/piora_ckpt_steps_1_3.sbatch
+
+# real run (about 3-6 h on one A100; resubmitting skips finished stages)
+module load slurm/slurm/23.02.7
+sbatch benchmarks/piora_ckpt_steps_1_3.sbatch
+```
+
+Send back the printed `ckpt_steps_1_3_<timestamp>.tar.gz` (in the work folder)
+plus the branch and commit from `run_info.txt`. Options (environment
+variables): `STAGES="preflight probe t2 t4 t6"`, `POLICIES`, `WIDTH`,
+`LAUNCHES_T2`, `LAUNCHES_LONG`, `FORCE=1`. `preflight.py` can also be run alone
+(`PYTHONPATH=. python benchmarks/preflight.py --workdir ...`); exit code 2 means
+only `torch.compile` is unavailable, and the probe is then skipped.
+Nothing in this job has been run on a GPU yet.
