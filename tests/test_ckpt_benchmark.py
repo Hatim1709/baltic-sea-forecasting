@@ -286,7 +286,8 @@ def test_run_length_matches_reference_short_run():
 
 def test_without_flag_removes_flag_and_value():
     tokens = ["--a", "1", "--ckpt_policy", "off", "--b", "2"]
-    assert bench.without_flag(tokens, "--ckpt_policy") == ["--a", "1", "--b", "2"]
+    kept = bench.without_flag(tokens, "--ckpt_policy")
+    assert kept == ["--a", "1", "--b", "2"]
     assert bench.without_flag(["--x"], "--x") == []
 
 
@@ -319,7 +320,9 @@ def test_reference_check_accepts_defaults_and_rejects_changes():
 
     ok, _ = bench.check_reference(module, args(), "off")
     assert ok
-    ok, _ = bench.check_reference(module, args(steps=4, width=2048), "selective")
+    ok, _ = bench.check_reference(
+        module, args(steps=4, width=2048), "selective"
+    )
     assert ok  # width and steps are study settings
     ok, text = bench.check_reference(
         module, args(extra_args="--precision 32"), "off"

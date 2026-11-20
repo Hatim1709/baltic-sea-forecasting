@@ -43,7 +43,6 @@ VENV=${VENV:-/home/hatim1709/.venvs/njord-learning}
 OUT=${OUT:-$WORKDIR/ckpt_steps_1_3}
 DRY_RUN=${DRY_RUN:-0}
 FORCE=${FORCE:-0}
-BENCH_EXTRA=${BENCH_EXTRA:-}    # further arguments for the benchmark script
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -148,11 +147,11 @@ stage_probe() {
 stage_bench() {
     local steps=$1 launches=$2 dry=""
     [ "$DRY_RUN" = 1 ] && dry="--dry_run"
-    # shellcheck disable=SC2086  (POLICIES and BENCH_EXTRA are word lists)
+    # shellcheck disable=SC2086  (POLICIES is a word list)
     python "$REPO/benchmarks/run_ckpt_policy_benchmark.py" \
         --workdir "$WORKDIR" --output_dir "$OUT/t$steps" \
         --width "$WIDTH" --steps "$steps" --launches "$launches" \
-        --measured "$MEASURED" --policies $POLICIES $dry $BENCH_EXTRA
+        --measured "$MEASURED" --policies $POLICIES $dry
 }
 
 ABORT=0

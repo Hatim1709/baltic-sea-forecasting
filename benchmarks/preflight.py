@@ -13,7 +13,7 @@ Exit code: 0 = all fine, 1 = a blocking problem (do not start the benchmark),
 skip compile_budget_probe.py).
 
 Usage (inside the GPU allocation, with the environment activated):
-    PYTHONPATH=. python benchmarks/preflight.py --workdir /scratch/hatim1709/njord
+    PYTHONPATH=. python benchmarks/preflight.py --workdir WORKDIR
 """
 
 # Standard library
@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 OK, WARN, FAIL, COMPILE_FAIL = "OK  ", "WARN", "FAIL", "COMPILE"
-REFERENCE_GPU_MIB = 80 * 1024 * 0.97  # an "80GB" A100 shows ~81 GiB
+REFERENCE_GPU_MIB = 80 * 1024 * 0.97  # allow for reserved memory
 
 
 def check_python():

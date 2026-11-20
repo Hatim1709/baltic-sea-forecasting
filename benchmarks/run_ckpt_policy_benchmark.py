@@ -1,9 +1,10 @@
 """
 Single-GPU benchmark of the four gradient checkpointing policies.
 
-For every policy in {off, unroll, internal, unroll+internal} (see
-neural_lam/checkpointing.py) this script trains GraphEFM for a few updates in a
-FRESH Python process, and compares time and GPU memory per training update.
+For every policy in {off, unroll, internal, unroll+internal} (plus selective
+and unroll+selective with --policies; see neural_lam/checkpointing.py) this
+script trains GraphEFM for a few updates in a FRESH Python process, and
+compares time and GPU memory per training update.
 
 What it does
 ------------
@@ -791,12 +792,6 @@ def parse_args(argv=None):
         "NOT comparable with the shared baseline)",
     )
     parser.add_argument(
-        "--allow_different_workload",
-        action="store_true",
-        help="run even if the reference check reports workload differences "
-        "(results are then NOT comparable with the shared baseline)",
-    )
-    parser.add_argument(
         "--dry_run",
         action="store_true",
         help="print the plan, commands and reference check, run nothing",
@@ -846,11 +841,11 @@ def main(argv=None):
             )
             print(f"Reference workload check ({reference_path}):")
             print(reference_report, "\n", flush=True)
-            if not same_workload and not args.allow_different_workload:
+            if same_workload is False:
                 raise SystemExit(
                     "Stopping: not the shared reference workload, so the"
                     " numbers would not be comparable. Fix the flags (see"
-                    " above) or pass --allow_different_workload."
+                    " above) or pass --skip_reference_check."
                 )
     plan = build_plan(args.policies, args.launches, args.seed)
     if args.dry_run:
