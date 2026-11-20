@@ -1,0 +1,45 @@
+# Checkpointing work: status and roadmap
+
+Status as of 2026-11-20. "Verified" means run on CPU in tests; nothing has been
+run on a GPU yet.
+
+## Done (branch `nils`, on top of the pinned commit `288164d`)
+
+- [x] `a09c656` (Hatim) step timing and GPU memory written to a CSV
+- [x] `2614837` `--ckpt_policy`: `auto` (old behaviour), `off`, `unroll`
+      (whole forecast step), `internal` (each GNN layer), `unroll+internal`;
+      tests check identical outputs and gradients (CPU)
+- [x] `a393c1b` merge of the timing callback into `nils`
+- [x] `e8fe696` event counters + benchmark runner (fresh process per launch,
+      audit that each policy really recomputed, bootstrap intervals)
+- [x] `eae063d` selective checkpointing (SAC): `selective`,
+      `unroll+selective`; `compile_budget_probe.py` for `torch.compile` with a
+      memory budget (single layer)
+- [x] `ee391c9` shared reference-workload check, `preflight.py`, one-job script
+      `piora_ckpt_steps_1_3.sbatch` (steps 1-3)
+- [x] `877b876` tidy-up
+
+## Next (in order)
+
+- [ ] Hatim runs `piora_ckpt_steps_1_3.sbatch`: preflight, compile probe,
+      policies at T=2/4/6 on the A100 (reference workload)
+- [ ] Read results: is `selective` better than `internal` (less time, similar
+      memory)? Does `torch.compile` work on Piora?
+- [ ] Profile memory and time per layer / mesh level
+- [ ] Per-layer planner: keep, selective, or recompute per layer under a
+      memory budget (today the policy is one global setting)
+- [ ] Automatic planner after the Jane Street blog post (greedy drop of saved
+      values under a budget, via `torch.compile` custom partitioner). Start
+      on a separate branch; only useful if `torch.compile` works on Piora.
+      Compare against `selective` / `internal` / PyTorch's budget setting.
+
+## Possible extensions (proposals, not started)
+
+- [ ] Avoid storing the large edge-message input (gather + concat of edge,
+      sender, receiver features): fused kernel or chunked edge processing
+- [ ] Offload saved activations to CPU memory and overlap the copy with compute
+- [ ] CUDA graphs or streams to cut launch overhead of recomputation
+- [ ] GPU-partitioned mesh: for boundary (halo) nodes, compare recomputing
+      against communicating; overlap recompute with communication
+- [ ] Per-GPU planner: memory budget per partition (unequal partitions)
+- [ ] Larger width / longer rollout: find where each policy stops fitting
