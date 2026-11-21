@@ -66,8 +66,10 @@ class InteractionNet(pyg.nn.MessagePassing):
 
         # Store number of receiver nodes according to edge_index
         if num_rec is None:
-            # Derive from edge_index
-            self.num_rec = edge_index[1].max() + 1
+            # Derive from edge_index. A Python int (not a 0-d tensor) so
+            # that the size is known to torch.compile and PyG's scatter does
+            # not need a data-dependent read (graph break otherwise).
+            self.num_rec = int(edge_index[1].max()) + 1
         else:
             self.num_rec = num_rec
 
@@ -292,8 +294,10 @@ class FlexibleNet(pyg.nn.MessagePassing):
 
         # Store number of receiver nodes according to edge_index
         if num_rec is None:
-            # Derive from edge_index
-            self.num_rec = edge_index[1].max() + 1
+            # Derive from edge_index. A Python int (not a 0-d tensor) so
+            # that the size is known to torch.compile and PyG's scatter does
+            # not need a data-dependent read (graph break otherwise).
+            self.num_rec = int(edge_index[1].max()) + 1
         else:
             self.num_rec = num_rec
 
