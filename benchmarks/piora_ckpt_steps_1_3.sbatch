@@ -65,6 +65,11 @@ else
 fi
 export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 export WANDB_MODE=offline
+# torch.compile needs a C++ compiler. On Piora the gcc/13.3 module points to a
+# path that does not exist, so use the system compiler (set before sourcing
+# anything else to override: CC=... CXX=... sbatch ...).
+export CC=${CC:-/usr/bin/gcc}
+export CXX=${CXX:-/usr/bin/g++}
 [ -d "$WORKDIR" ] || die "WORKDIR not found: $WORKDIR"
 mkdir -p "$OUT" || die "cannot create $OUT"
 cd "$WORKDIR" || die "cannot enter $WORKDIR"
