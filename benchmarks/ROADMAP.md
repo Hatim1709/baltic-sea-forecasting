@@ -1,7 +1,7 @@
 # Checkpointing work: status and roadmap
 
-Status as of 2026-11-20. "Verified" means run on CPU in tests; nothing has been
-run on a GPU yet.
+Status as of 2026-11-22. "Verified" means run on CPU in tests; Hatim's GPU
+results (steps 1-3) are in RESULTS.md.
 
 ## Done (branch `nils`, on top of the pinned commit `288164d`)
 
@@ -18,13 +18,15 @@ run on a GPU yet.
 - [x] `ee391c9` shared reference-workload check, `preflight.py`, one-job script
       `piora_ckpt_steps_1_3.sbatch` (steps 1-3)
 - [x] `877b876` tidy-up
+- [x] Steps 1-3 run on Piora (job 87918), see RESULTS.md
+- [x] `d1a7b05` `num_rec` as Python int: removes torch.compile graph breaks
+- [x] `--ckpt_unroll_steps K` + `plan_unroll_steps.py` (partial unroll)
+- [x] Planner interface written down: PLANNER.md (not implemented)
 
 ## Next (in order)
 
-- [ ] Hatim runs `piora_ckpt_steps_1_3.sbatch`: preflight, compile probe,
-      policies at T=2/4/6 on the A100 (reference workload)
-- [ ] Read results: is `selective` better than `internal` (less time, similar
-      memory)? Does `torch.compile` work on Piora?
+- [ ] Optional GPU check (Hatim): T=6, `unroll` with K=3, predicted about
+      40.7 GiB and 1.4x time
 - [ ] Profile memory and time per layer / mesh level
 - [ ] Per-layer planner: keep, selective, or recompute per layer under a
       memory budget (today the policy is one global setting)
