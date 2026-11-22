@@ -101,6 +101,15 @@ def policy_flags(policy, force_unroll, ar_steps_train):
     return _FIXED_POLICIES[policy]
 
 
+def step_is_checkpointed(step, unroll_steps):
+    """
+    Whether forecast step ``step`` is a checkpointed block when step-level
+    checkpointing is on. ``unroll_steps`` K: only steps 0..K-1 are
+    checkpointed; -1 (or no step index) means every step.
+    """
+    return step is None or unroll_steps < 0 or step < unroll_steps
+
+
 # Event counters, used by the benchmark to check that a policy really did
 # what it claims (e.g. that a recomputation happened). They count Python-level
 # events, cost nothing measurable and never affect results.

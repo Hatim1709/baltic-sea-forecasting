@@ -551,3 +551,53 @@ def test_selective_saves_matmuls_but_recomputes_cheap_ops(case_index):
     norm = "aten.native_layer_norm.default"
     assert full[norm] == 2 * plain[norm]
     assert selective[norm] == 2 * plain[norm]
+
+
+@pytest.mark.parametrize(
+    "step,k,expected",
+    [(None, 2, True), (0, -1, True), (5, -1, True), (0, 2, True),
+     (1, 2, True), (2, 2, False), (3, 0, False), (0, 0, False)],
+)
+def test_step_is_checkpointed(step, k, expected):
+    assert checkpointing.step_is_checkpointed(step, k) is expected
+
+
+@pytest.mark.parametrize("k", [-1, 0, 1, 2, 4])
+def test_partial_unroll_counts_blocks_and_keeps_results(k):
+    """Only the first K steps are checkpointed; outputs and gradients match"""
+
+    class Stub(nn.Module):
+        unroll_ckpt_func = ARModel.unroll_ckpt_func
+
+        def __init__(self):
+            super().__init__()
+            self.grad_checkpointing = True
+            self.ckpt_unroll_steps = k
+            self.lin = nn.Linear(DIM, DIM, dtype=torch.float64)
+
+        def step_fn(self, x):
+            return torch.tanh(self.lin(x))
+
+        def rollout(self, x, steps=4):
+            for i in range(steps):
+                x = self.unroll_ckpt_func(self.step_fn, x, step=i)
+            return x.sum()
+
+    torch.manual_seed(0)
+    x = torch.randn(3, DIM, dtype=torch.float64)
+    results = []
+    for checkpoint in (True, False):  # second run: plain, for comparison
+        model = Stub()
+        torch.manual_seed(1)
+        model.lin.reset_parameters()
+        model.grad_checkpointing = checkpoint
+        checkpointing.reset_counts()
+        loss = model.rollout(x)
+        loss.backward()
+        blocks = checkpointing.get_counts()["unroll_blocks"]
+        results.append((loss.item(), model.lin.weight.grad.clone(), blocks))
+    expected_blocks = 4 if k < 0 else min(k, 4)
+    assert results[0][2] == expected_blocks
+    assert results[1][2] == 0
+    assert results[0][0] == pytest.approx(results[1][0])
+    torch.testing.assert_close(results[0][1], results[1][1])

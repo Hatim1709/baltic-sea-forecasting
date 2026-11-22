@@ -380,6 +380,9 @@ class ARModel(pl.LightningModule):
         # when they change ar_steps_train between phases.
         # Other policies (--ckpt_policy) are described in checkpointing.py.
         self.ckpt_policy = getattr(args, "ckpt_policy", "auto")
+        # How many forecast steps get step-level checkpointing when it is
+        # on: the first K steps (-1 = all), see checkpointing.py
+        self.ckpt_unroll_steps = getattr(args, "ckpt_unroll_steps", -1)
         self.grad_checkpointing, _ = checkpointing.policy_flags(
             self.ckpt_policy, args.grad_checkpointing, args.ar_steps_train
         )
@@ -402,8 +405,13 @@ class ARModel(pl.LightningModule):
         self.grad_checkpointing = unroll
         checkpointing.set_internal_checkpointing(self, internal)
 
-    def unroll_ckpt_func(self, func, *args):
+    def unroll_ckpt_func(self, func, *args, step=None):
         """Run one unroll step, optionally with gradient checkpointing.
+
+        step: index of the forecast step. With --ckpt_unroll_steps K only
+        steps 0..K-1 are checkpointed (the early ones: backward then frees the
+        uncheckpointed late steps first, so their memory is not held at the
+        same time as the recomputation). None means "checkpoint".
 
         Checkpointing only saves memory while a graph is being built for
         backward, so it is skipped during validation/test and under
@@ -413,6 +421,9 @@ class ARModel(pl.LightningModule):
             self.grad_checkpointing
             and self.training
             and torch.is_grad_enabled()
+            and checkpointing.step_is_checkpointed(
+                step, self.ckpt_unroll_steps
+            )
         ):
             checkpointing.count_unroll_block()
             return torch.utils.checkpoint.checkpoint(
@@ -886,6 +897,7 @@ class ARModel(pl.LightningModule):
                 forcing_step,
                 boundary_forcing_step,
                 atmosphere_forcing_step,
+                step=i,
             )
             # state: (B, num_grid_nodes, d_f)
             # pred_std: (B, num_grid_nodes, d_f) or None

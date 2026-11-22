@@ -683,6 +683,15 @@ def main(input_args=None):
         "plus selective layers (default: auto)",
     )
     parser.add_argument(
+        "--ckpt_unroll_steps",
+        type=int,
+        default=-1,
+        help="With step-level checkpointing, checkpoint only the first K "
+        "forecast steps and keep the rest in memory (faster, uses more "
+        "memory; see benchmarks/plan_unroll_steps.py to pick K for a memory "
+        "budget). -1 = all steps (default: -1)",
+    )
+    parser.add_argument(
         "--limit_train_batches",
         type=float,
         default=None,
@@ -952,6 +961,9 @@ def main(input_args=None):
         "--grad_checkpointing (checkpoint every unroll step) contradicts "
         f"--ckpt_policy {args.ckpt_policy}"
     )
+    assert (
+        args.ckpt_unroll_steps >= -1
+    ), "--ckpt_unroll_steps must be -1 (all) or a number of steps >= 0"
     assert args.model in MODELS, f"Unknown model: {args.model}"
     assert args.eval in (
         None,

@@ -817,6 +817,7 @@ class GraphEFM(ARProbModel):
                 forcing[:, i],
                 boundary_forcing[:, i],
                 atmosphere_forcing[:, i],
+                step=i,
             )
             # (B,), (B,), (B, num_grid_nodes, d_state),
             # pred_std is (B, num_grid_nodes, d_state) or (d_state)

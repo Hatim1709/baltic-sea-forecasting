@@ -328,3 +328,20 @@ def test_reference_check_accepts_defaults_and_rejects_changes():
         module, args(extra_args="--precision 32"), "off"
     )
     assert not ok and "--precision" in text
+
+
+def test_plan_unroll_steps_reproduces_measured_points():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parent.parent / "benchmarks" / "plan_unroll_steps.py"
+    spec = importlib.util.spec_from_file_location("plan_unroll_steps", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    # measured: off T=6 73540 MiB, unroll T=6 18814 MiB
+    assert abs(mod.predict(6, 0)[0] - 73540) / 73540 < 0.01
+    assert abs(mod.predict(6, 6)[0] - 18814) / 18814 < 0.01
+    assert mod.plan_unroll_steps(6, 80000)[0] == 0
+    k, peak, _ = mod.plan_unroll_steps(6, 40000)
+    assert (k, round(peak)) == (3, 40654) or peak <= 40000
+    assert mod.plan_unroll_steps(6, 5000) is None

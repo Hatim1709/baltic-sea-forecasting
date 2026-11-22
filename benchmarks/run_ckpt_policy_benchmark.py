@@ -847,6 +847,12 @@ def main(argv=None):
                     " numbers would not be comparable. Fix the flags (see"
                     " above) or pass --skip_reference_check."
                 )
+    if "--ckpt_unroll_steps" in args.extra_args:
+        raise SystemExit(
+            "ERROR: the audit of event counters assumes every forecast step"
+            " is checkpointed; run partial unroll (--ckpt_unroll_steps) with"
+            " the training script directly."
+        )
     plan = build_plan(args.policies, args.launches, args.seed)
     if args.dry_run:
         for item in plan:
