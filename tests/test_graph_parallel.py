@@ -31,6 +31,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 from typing import Union
+from unittest import mock
 
 try:
     # Third-party
@@ -160,7 +161,9 @@ def _gradient(value):
 
 
 def _compare_input_gradients(actual, expected, label):
-    gradient = _gradient(actual)
+    # clone() preserves strides of noncontiguous leaf gradients. NCCL needs
+    # a contiguous communication buffer; keep the original gradient intact.
+    gradient = _gradient(actual).contiguous()
     if gradient.numel():
         dist.all_reduce(gradient, op=dist.ReduceOp.SUM)
     _assert_close(gradient, _gradient(expected), label)
@@ -732,6 +735,30 @@ def _run_two_ranks(suite, backend=None):
                 for process in processes.processes:
                     process.join(timeout=5)
                 raise AssertionError(f"Distributed {suite} test timed out")
+
+
+@unittest.skipUnless(torch is not None, "PyTorch is required")
+class GradientComparisonTests(unittest.TestCase):
+    def test_noncontiguous_gradient_uses_contiguous_collective_buffer(self):
+        actual = _leaf((2, 4, 3), torch.device("cpu"), noncontiguous=True)
+        expected = actual.detach().clone().requires_grad_(True)
+        actual.grad = torch.ones_like(actual)
+        expected.grad = WORLD_SIZE * torch.ones_like(expected)
+        self.assertFalse(actual.grad.is_contiguous())
+        original = actual.grad.clone()
+
+        def strict_sum(buffer, op):
+            self.assertTrue(buffer.is_contiguous())
+            self.assertEqual(op, dist.ReduceOp.SUM)
+            buffer.mul_(WORLD_SIZE)
+
+        with mock.patch.object(
+            dist, "all_reduce", side_effect=strict_sum
+        ) as reduce:
+            _compare_input_gradients(actual, expected, "strided input")
+        reduce.assert_called_once()
+        torch.testing.assert_close(actual.grad, original, rtol=0, atol=0)
+        self.assertFalse(actual.grad.is_contiguous())
 
 
 @unittest.skipUnless(
