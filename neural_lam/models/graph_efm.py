@@ -260,6 +260,12 @@ class GraphEFM(ARProbModel):
         ) = self.grid_static_features.shape
         self.num_total_grid_nodes = self.num_interior_nodes
 
+        latent_layers = (args.prior_intra_layer, args.encoder_intra_layer)
+        if not self.hierarchical_graph and any(t != "interaction" for t in latent_layers):
+            raise ValueError("--prior/encoder_intra_layer is only implemented for hierarchical graphs")
+        if not args.learn_prior and args.prior_intra_layer != "interaction":
+            raise ValueError("--prior_intra_layer needs a learned prior (--learn_prior)")
+
         # Prior
         if args.learn_prior:
             if self.hierarchical_graph:
@@ -276,6 +282,8 @@ class GraphEFM(ARProbModel):
                     hidden_layers=args.hidden_layers,
                     output_dist=args.prior_dist,
                     num_grid_con_mesh_nodes=self.num_grid_con_mesh_nodes,
+                    intra_layer_type=args.prior_intra_layer,
+                    attention_heads=args.attention_heads,
                 )
             else:
                 self.prior_model = GraphLatentEncoder(
@@ -314,6 +322,8 @@ class GraphEFM(ARProbModel):
                 hidden_layers=args.hidden_layers,
                 output_dist="diagonal",
                 num_grid_con_mesh_nodes=self.num_grid_con_mesh_nodes,
+                intra_layer_type=args.encoder_intra_layer,
+                attention_heads=args.attention_heads,
             )
             # Decoder
             self.decoder = HiGraphLatentDecoder(

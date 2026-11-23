@@ -28,6 +28,8 @@ class HiGraphLatentEncoder(BaseLatentEncoder):
         hidden_layers=1,
         output_dist="isotropic",
         num_grid_con_mesh_nodes=None,
+        intra_layer_type="interaction",
+        attention_heads=None,
     ):
         super().__init__(
             latent_dim,
@@ -68,7 +70,8 @@ class HiGraphLatentEncoder(BaseLatentEncoder):
         self.intra_level_gnns = nn.ModuleList(
             [
                 utils.make_gnn_seq(
-                    edge_index, intra_level_layers, hidden_layers, hidden_dim
+                    edge_index, intra_level_layers, hidden_layers, hidden_dim,
+                    layer_type=intra_layer_type, attention_heads=attention_heads,
                 )
                 for edge_index in m2m_edge_index
             ]

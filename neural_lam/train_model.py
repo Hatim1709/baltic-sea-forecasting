@@ -230,6 +230,14 @@ def main(input_args=None):
         "GraphEFM hierarchical decoder (default: interaction)",
     )
     parser.add_argument(
+        "--prior_intra_layer", type=str, default="interaction", choices=INTRA_LAYER_TYPES,
+        help="Layer type for the same-level GNN layers of the GraphEFM prior",
+    )
+    parser.add_argument(
+        "--encoder_intra_layer", type=str, default="interaction", choices=INTRA_LAYER_TYPES,
+        help="Layer type for the same-level GNN layers of the GraphEFM encoder",
+    )
+    parser.add_argument(
         "--attention_heads",
         type=int,
         default=None,
@@ -858,6 +866,10 @@ def main(input_args=None):
     assert (
         args.config_path is not None
     ), "Specify your config with --config_path"
+    intra_flags = (args.decoder_intra_layer, args.prior_intra_layer, args.encoder_intra_layer)
+    assert all(t == "interaction" for t in intra_flags) or args.model == "graph_efm", (
+        "--*_intra_layer is only implemented for --model graph_efm"
+    )
     assert args.model in MODELS, f"Unknown model: {args.model}"
     assert args.eval in (
         None,
