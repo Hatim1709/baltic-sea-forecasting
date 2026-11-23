@@ -92,6 +92,11 @@ class StaticEdgeAttention(pyg.nn.MessagePassing):
 
         self.aggr_mlp = utils.make_mlp([2 * d] + [d] * (hidden_layers + 1))
         self.uniform_weights = uniform_weights
+        if uniform_weights:
+        # Not used when the weights are uniform. Freeze them so DDP and the
+        # optimizer ignore them (DDP requires a gradient for every trainable parameter).
+            for module in (self.q_proj, self.k_proj, self.k_edge):
+                module.requires_grad_(False)
 
 
     def forward(self, send_rep, rec_rep, edge_rep, emb=None):
