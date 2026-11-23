@@ -8,7 +8,7 @@ from torch import nn
 from . import utils
 from .interaction_net import InteractionNet
 
-INTRA_LAYER_TYPES = ("interaction", "interaction_static_edges", "attention")
+INTRA_LAYER_TYPES = ("interaction", "interaction_static_edges", "attention", "attention_uniform")
 
 
 class StaticEdgeInteractionNet(InteractionNet):
@@ -40,6 +40,12 @@ def build_intra_layer(layer_type, edge_index, hidden_dim, hidden_layers,
         if(attention_heads == None):
             raise ValueError(f"Missing attention heads")
         return StaticEdgeAttention(edge_index, hidden_dim, attention_heads, hidden_layers=hidden_layers)
+    if layer_type == "attention_uniform":
+        if attention_heads is None:
+            raise ValueError("--decoder_intra_layer attention_uniform needs --attention_heads")
+        return StaticEdgeAttention(edge_index, hidden_dim, attention_heads,
+                                hidden_layers=hidden_layers, uniform_weights=True)
+
     raise ValueError(f"Unknown intra-level layer type: {layer_type}")
 
 
@@ -59,7 +65,7 @@ class StaticEdgeAttention(pyg.nn.MessagePassing):
 
     """
 
-    def __init__(self, edge_index, input_dim, num_heads, hidden_layers=1):
+    def __init__(self, edge_index, input_dim, num_heads, hidden_layers=1, uniform_weights = False):
         assert(input_dim % num_heads == 0)
         super().__init__(aggr = "sum")
 
@@ -85,6 +91,8 @@ class StaticEdgeAttention(pyg.nn.MessagePassing):
         self.v_edge = nn.Linear(d, d, bias = False)
 
         self.aggr_mlp = utils.make_mlp([2 * d] + [d] * (hidden_layers + 1))
+        self.uniform_weights = uniform_weights
+
 
     def forward(self, send_rep, rec_rep, edge_rep, emb=None):
         node_reps = torch.cat((rec_rep, send_rep), dim=-2)
@@ -99,7 +107,10 @@ class StaticEdgeAttention(pyg.nn.MessagePassing):
     def message(self, q_i, k_j, v_j, k_e, v_e, index):
         heads = lambda t: t.view(*t.shape[:-1], self.num_heads, self.d_k)   # (B, M, H, d_k)
         q, k, v = heads(q_i), heads(k_j + k_e), heads(v_j + v_e)
-        scores = (q * k).sum(-1) * self.scale                                # (B, M, H)
+        if self.uniform_weights:
+            scores = torch.zeros(q.shape[:-1], device=q.device)   # (B, M, H): softmax -> 1/in-degree
+        else:
+            scores = (q * k).sum(-1) * self.scale                 # (B, M, H)
         alpha = pyg.utils.softmax(scores.float(), index, num_nodes=self.num_rec, dim=1)
         return (alpha.to(v.dtype).unsqueeze(-1) * v).flatten(-2)             # (B, M, d)
 
