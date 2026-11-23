@@ -866,10 +866,6 @@ def main(input_args=None):
     assert (
         args.config_path is not None
     ), "Specify your config with --config_path"
-    intra_flags = (args.decoder_intra_layer, args.prior_intra_layer, args.encoder_intra_layer)
-    assert all(t == "interaction" for t in intra_flags) or args.model == "graph_efm", (
-        "--*_intra_layer is only implemented for --model graph_efm"
-    )
     assert args.model in MODELS, f"Unknown model: {args.model}"
     assert args.eval in (
         None,
@@ -877,8 +873,9 @@ def main(input_args=None):
         "test",
     ), f"Unknown eval setting: {args.eval}"
 
-    assert args.decoder_intra_layer == "interaction" or args.model == "graph_efm", (
-        "--decoder_intra_layer is only implemented for --model graph_efm"
+    intra_flags = (args.decoder_intra_layer, args.prior_intra_layer, args.encoder_intra_layer)
+    assert all(t == "interaction" for t in intra_flags) or args.model == "graph_efm", (
+        "--*_intra_layer is only implemented for --model graph_efm"
     )
 
     # Get an (actual) random run id as a unique identifier
