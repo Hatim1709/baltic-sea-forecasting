@@ -170,3 +170,20 @@ def test_step_profiler_can_write_a_kernel_table(tmp_path):
     callback.on_train_batch_end(None, model, None, x, 0)
     table = (tmp_path / "kernels.txt").read_text()
     assert "aten::" in table
+
+
+def test_saved_memory_by_dtype_adds_up_to_the_regions():
+    model = Tiny()
+    x = torch.randn(64, 16)
+    profiler = RegionProfiler(model, max_depth=2)
+    profiler.start(batch=x)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        loss = model(x).float().sum()
+    profiler.stop_saving()
+    loss.backward()
+    profiler.stop()
+    by_dtype = profiler.dtype_summary()
+    assert "bfloat16" in by_dtype
+    assert sum(by_dtype.values()) == pytest.approx(
+        sum(r["saved_mib"] for r in profiler.summary())
+    )

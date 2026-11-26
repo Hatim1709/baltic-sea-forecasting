@@ -75,6 +75,7 @@ class RegionProfiler:
         self.cuda = any(p.is_cuda for p in model.parameters())
         self.calls = []  # one dict per call of a region
         self.saved = {}  # region name -> bytes saved for backward
+        self.saved_dtype = {}  # dtype name -> bytes saved for backward
         self._stack = []  # indices into self.calls of the running regions
         self._seen = set()  # storage pointers that are not counted again
         self._handles = []
@@ -121,6 +122,10 @@ class RegionProfiler:
                 else "<outside regions>"
             )
             self.saved[region] = self.saved.get(region, 0) + info[1]
+            dtype = str(tensor.dtype).replace("torch.", "")
+            self.saved_dtype[dtype] = (
+                self.saved_dtype.get(dtype, 0) + info[1]
+            )
         return tensor
 
     @staticmethod
@@ -175,6 +180,10 @@ class RegionProfiler:
                 call["ms"] = (call["end"] - call["start"]) * 1000
         for call in self.calls:
             del call["start"], call["end"]
+
+    def dtype_summary(self):
+        """MiB saved for backward per data type (e.g. float32, bfloat16)"""
+        return {k: v / MIB for k, v in sorted(self.saved_dtype.items())}
 
     def summary(self):
         """
@@ -334,6 +343,7 @@ class StepProfiler(pl.Callback):
             },
             "static_mib": self.static_mib if self.cuda else None,
             "phases": self.phases,
+            "saved_by_dtype_mib": self.profiler.dtype_summary(),
             "regions": self.profiler.summary(),
         }
         path = self.out_dir / "profile_step.json"

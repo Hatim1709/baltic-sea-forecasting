@@ -147,6 +147,10 @@ def main():
         f"\nForward is {100 * fwd_share:.0f}% of an update, so a full "
         f"recompute (unroll) should cost about {1 + fwd_share:.2f}x."
     )
+    if off.get("saved_by_dtype_mib"):
+        print("\nMemory saved for backward, by number format:")
+        for name, mib in off["saved_by_dtype_mib"].items():
+            print(f"  {name:<10}{mib:9.0f} MiB")
     groups = group_regions(off, args.depth)
     print(f"\nWhat each part of a forecast step stores (steps={steps}):")
     print("\n".join(region_lines(groups, steps)))
