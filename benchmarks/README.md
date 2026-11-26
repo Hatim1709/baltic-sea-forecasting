@@ -102,3 +102,13 @@ variables): `STAGES="preflight probe t2 t4 t6"`, `POLICIES`, `WIDTH`,
 (`PYTHONPATH=. python benchmarks/preflight.py --workdir ...`); exit code 2 means
 only `torch.compile` is unavailable, and the probe is then skipped.
 Nothing in this job has been run on a GPU yet.
+
+## Where is the peak of `unroll`? (profiling on any one GPU)
+
+`profile_peak.py` runs `off` (1 forecast step) and `unroll` (2 steps) with
+`--profile_dir`, then prints `report.txt`: peak memory of the forward, backward
+and optimizer phases, memory saved and forward time per region of the step,
+a prediction of keeping some regions stored, and what was alive at the peak.
+On a Slurm cluster use `benchmarks/dinfk_profile_peak.sbatch` (set REPO, DATA,
+VENV at the top; DATA is the folder with `sample_data/`). Not yet run on a GPU;
+the CPU tests are in `tests/test_profiling.py`.

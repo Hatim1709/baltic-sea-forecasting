@@ -29,6 +29,7 @@ from .models import (
     GraphFM,
 )
 from .models.flow_map import add_flow_map_args
+from .profiling import StepProfiler
 from .weather_dataset import WeatherDataModule
 
 MODELS = {
@@ -692,6 +693,27 @@ def main(input_args=None):
         "budget). -1 = all steps (default: -1)",
     )
     parser.add_argument(
+        "--profile_dir",
+        type=str,
+        default=None,
+        help="Profile one training update (peak memory per phase, memory "
+        "saved for backward and forward time per region) and write "
+        "profile_step.json to this folder; see neural_lam/profiling.py "
+        "(default: off)",
+    )
+    parser.add_argument(
+        "--profile_batch",
+        type=int,
+        default=3,
+        help="0-based index of the update to profile (default: 3)",
+    )
+    parser.add_argument(
+        "--profile_snapshot",
+        action="store_true",
+        help="With --profile_dir: also write a GPU allocator snapshot "
+        "(default: False)",
+    )
+    parser.add_argument(
         "--limit_train_batches",
         type=float,
         default=None,
@@ -1102,6 +1124,14 @@ def main(input_args=None):
     )
     callbacks.append(last_ckpt_callback)
     callbacks.append(StepMeasurements(warmup=5))
+    if args.profile_dir:
+        callbacks.append(
+            StepProfiler(
+                args.profile_dir,
+                batch_idx=args.profile_batch,
+                snapshot=args.profile_snapshot,
+            )
+        )
     # Log the LR to the training logger, so that a mis-restored schedule after
     # a restart is visible instead of only showing up as a worse loss.
     callbacks.append(

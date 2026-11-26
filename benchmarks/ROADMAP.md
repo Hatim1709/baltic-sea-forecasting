@@ -25,6 +25,20 @@ results (steps 1-3) are in RESULTS.md.
 
 ## Next (in order)
 
+Decision after the supervisor meeting (2026-11-26): first find out whether more
+checkpointing work beats plain `unroll` at all.
+
+- [x] Profiling tools written (CPU-tested): `neural_lam/profiling.py`
+      (`--profile_dir`), `benchmarks/profile_peak.py`, `analyze_profile.py`,
+      `analyze_snapshot.py`, `dinfk_profile_peak.sbatch`
+- [ ] Run `profile_peak.py` on one GPU (student cluster): peak per phase of
+      `unroll`, saved memory and forward time per region
+- [ ] Go/no-go from `analyze_profile.py`: keep some regions stored if about
+      1 GiB/step buys at least about 15% less time than `unroll`;
+      otherwise report that `unroll` is the answer
+- [ ] If go: split the step at the latent, keep cheap-to-store regions, or
+      `torch.compile` a layer, depending on where the peak is
+
 - [ ] Optional GPU check (Hatim): T=6, `unroll` with K=3, predicted about
       40.7 GiB and 1.4x time
 - [ ] Profile memory and time per layer / mesh level
