@@ -31,13 +31,13 @@ checkpointing work beats plain `unroll` at all.
 - [x] Profiling tools written (CPU-tested): `neural_lam/profiling.py`
       (`--profile_dir`), `benchmarks/profile_peak.py`, `analyze_profile.py`,
       `analyze_snapshot.py`, `dinfk_profile_peak.sbatch`
-- [ ] Run `profile_peak.py` on one GPU (student cluster): peak per phase of
-      `unroll`, saved memory and forward time per region
-- [ ] Go/no-go from `analyze_profile.py`: keep some regions stored if about
-      1 GiB/step buys at least about 15% less time than `unroll`;
-      otherwise report that `unroll` is the answer
-- [ ] If go: split the step at the latent, keep cheap-to-store regions, or
-      `torch.compile` a layer, depending on where the peak is
+- [x] Ran `profile_peak.py` on the student cluster (2026-11-26): see
+      REPORT_2026-11-26.md and data/student_cluster_2026-11-26/
+- [x] Go/no-go: no-go for a per-region planner (about 9% for 1 GiB/step,
+      the same straight line as partial unroll); `unroll` is near-optimal
+- [ ] Make the forward pass cheaper: `torch.compile` of a GNN layer in the
+      real model, fewer fp32 casts (recompute is 77% of an update)
+- [ ] Prototype the split at the latent (lower peak, same time; predicted)
 
 - [ ] Optional GPU check (Hatim): T=6, `unroll` with K=3, predicted about
       40.7 GiB and 1.4x time
