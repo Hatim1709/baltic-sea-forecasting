@@ -109,6 +109,7 @@ Nothing in this job has been run on a GPU yet.
 `--profile_dir`, then prints `report.txt`: peak memory of the forward, backward
 and optimizer phases, memory saved and forward time per region of the step,
 a prediction of keeping some regions stored, and what was alive at the peak.
-On a Slurm cluster use `benchmarks/dinfk_profile_peak.sbatch` (set REPO, DATA,
-VENV at the top; DATA is the folder with `sample_data/`). Not yet run on a GPU;
+On the ETH student cluster use `benchmarks/dinfk_profile_peak.sbatch` (set REPO,
+DATA, VENV; DATA is the folder with `sample_data/`, downloaded with
+`hf download deinal/njord-sample-data --repo-type dataset`). Not yet run on a GPU;
 the CPU tests are in `tests/test_profiling.py`.

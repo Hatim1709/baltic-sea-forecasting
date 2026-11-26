@@ -1,29 +1,31 @@
 #!/bin/bash
 #SBATCH --job-name=profile-peak
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --gpus=5060ti:1
+#SBATCH --cpus-per-task=2
 #SBATCH --time=01:00:00
 #SBATCH --output=profile-peak-%j.out
 #
-# D-INFK student cluster (or any Slurm GPU node): where does the memory peak
-# of `unroll` occur? See benchmarks/profile_peak.py.
+# ETH D-INFK student cluster (isg.inf.ethz.ch, "Student Cluster"): where does
+# the memory peak of `unroll` occur? See benchmarks/profile_peak.py.
+# The cluster's GPUs are small (RTX 5060 Ti 16 GiB, 2080 Ti / 1080 Ti 11 GiB),
+# so the default width is 512; the GB10 (128 GiB) can run WIDTH=1024.
 #
-# Set up once (adapt the first two lines to your cluster account):
-#   export REPO=$HOME/baltic-sea-forecasting     # checkout, branch nils
-#   export DATA=$HOME/njord-data                 # folder containing sample_data/
-#   export VENV=$HOME/venvs/njord                # python env with the project deps
-# Then:
-#   sbatch [--partition=<gpu partition>] [--account=<account>] \
-#       benchmarks/dinfk_profile_peak.sbatch
-# Smaller cards: WIDTH=512 sbatch ...   (dry check: DRY_RUN=1 bash ...)
+# Set up once (see benchmarks/README.md), then:
+#   export REPO=/scratch/users/$USER/baltic-sea-forecasting
+#   export DATA=/scratch/users/$USER/njord-data      # contains sample_data/
+#   export VENV=/scratch/users/$USER/venv
+#   sbatch -A <your course/project tag> benchmarks/dinfk_profile_peak.sbatch
+# Other card:  sbatch -A <tag> --gpus=gb10:1 ...   (WIDTH=1024 for gb10)
+# Dry check on the login node:  DRY_RUN=1 bash benchmarks/dinfk_profile_peak.sbatch
 set -eu
 REPO=${REPO:-$HOME/baltic-sea-forecasting}
 DATA=${DATA:-$HOME/njord-data}
 VENV=${VENV:-$HOME/venvs/njord}
-WIDTH=${WIDTH:-1024}
+WIDTH=${WIDTH:-512}
 OUT=${OUT:-$DATA/profile_runs_$(date -u +%Y%m%dT%H%M%SZ)}
 
+. /etc/profile.d/modules.sh 2>/dev/null || true
+module add cuda/12.9 2>/dev/null || true
 source "$VENV/bin/activate"
 export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 export WANDB_MODE=offline
