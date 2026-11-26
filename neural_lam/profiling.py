@@ -225,7 +225,10 @@ class StepProfiler(pl.Callback):
     (`memory_snapshot.pickle`, analysed by benchmarks/analyze_snapshot.py).
     """
 
-    def __init__(self, out_dir, batch_idx=3, snapshot=False, max_depth=2):
+    def __init__(
+        self, out_dir, batch_idx=3, snapshot=False, max_depth=2, kernels=False
+    ):
+        self.kernels = kernels
         self.out_dir = Path(out_dir)
         self.batch_idx = batch_idx
         self.snapshot = snapshot
@@ -250,6 +253,24 @@ class StepProfiler(pl.Callback):
             torch.cuda.reset_peak_memory_stats()
         self._last = time.perf_counter()
 
+    def _write_kernel_table(self):
+        """Operations of the update sorted by own GPU (or CPU) time"""
+        self.kernel_profile.__exit__(None, None, None)
+        keys = (
+            ["self_device_time_total", "self_cuda_time_total"]
+            if self.cuda
+            else []
+        ) + ["self_cpu_time_total"]
+        for key in keys:
+            try:
+                table = self.kernel_profile.key_averages().table(
+                    sort_by=key, row_limit=30, max_name_column_width=70
+                )
+                break
+            except Exception:  # pylint: disable=broad-except
+                continue
+        (self.out_dir / "kernels.txt").write_text(table)
+
     # -- Lightning hooks
     def on_train_batch_start(self, trainer, model, batch, batch_idx):
         if batch_idx != self.batch_idx:
@@ -263,6 +284,12 @@ class StepProfiler(pl.Callback):
             torch.cuda.reset_peak_memory_stats()
             if self.snapshot:
                 torch.cuda.memory._record_memory_history(max_entries=500000)
+        if self.kernels:
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            if self.cuda:
+                activities.append(torch.profiler.ProfilerActivity.CUDA)
+            self.kernel_profile = torch.profiler.profile(activities=activities)
+            self.kernel_profile.__enter__()
         self.profiler = RegionProfiler(model, self.max_depth)
         self.profiler.start(batch)
         self._last = time.perf_counter()
@@ -283,6 +310,8 @@ class StepProfiler(pl.Callback):
         self._mark("optimizer")
         self.profiler.stop()
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        if self.kernels:
+            self._write_kernel_table()
         if self.cuda and self.snapshot:
             torch.cuda.memory._dump_snapshot(
                 str(self.out_dir / "memory_snapshot.pickle")

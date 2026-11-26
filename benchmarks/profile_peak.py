@@ -31,12 +31,16 @@ sys.path.insert(0, str(HERE))
 import run_ckpt_policy_benchmark as bench  # noqa: E402
 
 
-def launch_command(width, steps, policy, profile_dir, snapshot, extra):
+def launch_command(
+    width, steps, policy, profile_dir, snapshot, extra, kernels=False
+):
     """Training command of one profiling launch (10 updates, profile #3)"""
     args = bench.training_args(width, steps, policy, 5, extra)
     args += ["--profile_dir", str(profile_dir), "--profile_batch", "3"]
     if snapshot:
         args.append("--profile_snapshot")
+    if kernels:
+        args.append("--profile_kernels")
     return [sys.executable, "-m", "neural_lam.train_model"] + args
 
 
@@ -49,9 +53,36 @@ def main(argv=None):
     parser.add_argument("--unroll_steps", type=int, default=2)
     parser.add_argument("--extra_args", default="")
     parser.add_argument("--dry_run", action="store_true")
+    parser.add_argument(
+        "--kernels_only",
+        action="store_true",
+        help="only one `off` launch with a per-operation time table",
+    )
     args = parser.parse_args(argv)
 
     out = Path(args.output_dir).expanduser().resolve()
+    if args.kernels_only:
+        profile_dir = out / f"kernels_off_t{args.off_steps}"
+        command = launch_command(
+            args.width, args.off_steps, "off", profile_dir, False,
+            args.extra_args, kernels=True,
+        )
+        print(shlex.join(command))
+        if args.dry_run:
+            return
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        with open(profile_dir / "train.log", "w", encoding="utf-8") as file:
+            code = subprocess.call(
+                command, cwd=args.workdir, stdout=file,
+                stderr=subprocess.STDOUT,
+            )
+        table = profile_dir / "kernels.txt"
+        if code != 0 or not table.exists():
+            raise SystemExit(
+                f"failed (exit {code}), see {profile_dir}/train.log"
+            )
+        print(table.read_text())
+        return
     jobs = [
         ("off", args.off_steps, False),
         ("unroll", args.unroll_steps, True),

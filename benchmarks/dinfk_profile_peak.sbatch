@@ -34,5 +34,6 @@ echo "commit $(git -C "$REPO" rev-parse --short HEAD), branch $(git -C "$REPO" b
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 extra=""
 [ "${DRY_RUN:-0}" = 1 ] && extra="--dry_run"
+[ "${KERNELS_ONLY:-0}" = 1 ] && extra="$extra --kernels_only"
 python "$REPO/benchmarks/profile_peak.py" --workdir "$DATA" \
     --output_dir "$OUT" --width "$WIDTH" $extra

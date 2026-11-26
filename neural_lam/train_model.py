@@ -714,6 +714,12 @@ def main(input_args=None):
         "(default: False)",
     )
     parser.add_argument(
+        "--profile_kernels",
+        action="store_true",
+        help="With --profile_dir: also write kernels.txt, the operations of "
+        "the profiled update sorted by time (default: False)",
+    )
+    parser.add_argument(
         "--limit_train_batches",
         type=float,
         default=None,
@@ -1130,6 +1136,7 @@ def main(input_args=None):
                 args.profile_dir,
                 batch_idx=args.profile_batch,
                 snapshot=args.profile_snapshot,
+                kernels=args.profile_kernels,
             )
         )
     # Log the LR to the training logger, so that a mis-restored schedule after

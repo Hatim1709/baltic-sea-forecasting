@@ -155,3 +155,18 @@ def test_snapshot_replay_finds_peak_and_groups_by_site():
     groups = dict(analyze.group_live(live))
     assert groups["interaction_net.py:forward:7"] == 100
     assert groups[analyze.NO_FRAME] == 50
+
+
+def test_step_profiler_can_write_a_kernel_table(tmp_path):
+    model = Tiny()
+    model.ckpt_policy = "off"
+    callback = StepProfiler(tmp_path, batch_idx=0, kernels=True)
+    x = torch.randn(8, 16)
+    callback.on_train_batch_start(None, model, x, 0)
+    loss = model(x).sum()
+    callback.on_before_backward(None, model, loss)
+    loss.backward()
+    callback.on_after_backward(None, model)
+    callback.on_train_batch_end(None, model, None, x, 0)
+    table = (tmp_path / "kernels.txt").read_text()
+    assert "aten::" in table
