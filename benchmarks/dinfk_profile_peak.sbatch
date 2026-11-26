@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=profile-peak
 #SBATCH --gpus=5060ti:1
-#SBATCH --cpus-per-task=2
 #SBATCH --time=01:00:00
 #SBATCH --output=profile-peak-%j.out
 #
