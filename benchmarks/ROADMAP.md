@@ -35,8 +35,10 @@ checkpointing work beats plain `unroll` at all.
       REPORT_2026-11-26.md and data/student_cluster_2026-11-26/
 - [x] Go/no-go: no-go for a per-region planner (about 9% for 1 GiB/step,
       the same straight line as partial unroll); `unroll` is near-optimal
-- [ ] Make the forward pass cheaper: `torch.compile` of a GNN layer in the
-      real model, fewer fp32 casts (recompute is 77% of an update)
+- [x] `--compile_layers` (21 layers, student cluster): -8..9% time, -8..12%
+      memory, same policy ranking (REPORT_2026-11-26.md, update 2026-11-27)
+- [ ] Make the forward pass cheaper still: find what dominates it (GPU
+      operation profile on Piora), fewer fp32 casts (32% of saved memory)
 - [ ] Prototype the split at the latent (lower peak, same time; predicted)
 
 - [ ] Optional GPU check (Hatim): T=6, `unroll` with K=3, predicted about
