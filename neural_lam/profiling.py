@@ -340,6 +340,9 @@ class StepProfiler(pl.Callback):
                 "batch_idx": self.batch_idx,
                 "regions_saved_valid": getattr(model, "ckpt_policy", "")
                 == "off",
+                "compiled_graphs": dict(
+                    torch._dynamo.utils.counters.get("stats", {})
+                ),
             },
             "static_mib": self.static_mib if self.cuda else None,
             "phases": self.phases,

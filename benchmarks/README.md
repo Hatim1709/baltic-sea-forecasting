@@ -113,3 +113,16 @@ On the ETH student cluster use `benchmarks/dinfk_profile_peak.sbatch` (set REPO,
 DATA, VENV; DATA is the folder with `sample_data/`, downloaded with
 `hf download deinal/njord-sample-data --repo-type dataset`). Not yet run on a GPU;
 the CPU tests are in `tests/test_profiling.py`.
+
+### torch.compile of the GNN layers (`--compile_layers`)
+
+`neural_lam/compile_layers.py` compiles each layer's computation; checkpoint
+policies and counters still work. Compare eager with compiled on the same GPU:
+
+    sbatch -A <tag> benchmarks/dinfk_profile_peak.sbatch
+    EXTRA_ARGS="--compile_layers" sbatch -A <tag> benchmarks/dinfk_profile_peak.sbatch
+
+then compare the `forward`/`backward` lines and the peaks of the two
+`report.txt` files. The first update of a compiled run includes compilation
+(several minutes); the profiled update (#3) does not. CPU tests:
+`tests/test_compile_layers.py` (need g++).

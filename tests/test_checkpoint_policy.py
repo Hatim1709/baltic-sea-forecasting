@@ -601,3 +601,56 @@ def test_partial_unroll_counts_blocks_and_keeps_results(k):
     assert results[1][2] == 0
     assert results[0][0] == pytest.approx(results[1][0])
     torch.testing.assert_close(results[0][1], results[1][1])
+
+
+def _held_after_forward_mib(mode, steps):
+    """MiB of tensors alive in Python objects after a step-checkpointed
+    forward pass (before backward), not counting inputs and parameters."""
+    import gc
+
+    edge_index = _same_level_edges(num_nodes=200, num_extra=1000)
+    torch.manual_seed(0)
+    seq = utils.make_gnn_seq(edge_index, 3, 1, 32).train()
+    checkpointing.set_internal_checkpointing(seq, mode)
+    x = torch.randn(1, 200, 32, requires_grad=True)
+    edges = torch.randn(1, edge_index.shape[1], 32)
+    skip = {
+        t.untyped_storage().data_ptr()
+        for t in list(seq.parameters()) + [x, edges]
+    }
+    hidden = x
+    for _ in range(steps):
+        hidden = torch.utils.checkpoint.checkpoint(
+            lambda h: seq(h, edges)[0], hidden, use_reentrant=False
+        )
+    gc.collect()
+    seen = {}
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj):
+            ptr = obj.untyped_storage().data_ptr()
+            if ptr not in skip:
+                seen[ptr] = obj.untyped_storage().nbytes()
+    hidden.sum().backward()
+    return sum(seen.values()) / 2**20
+
+
+def test_nested_selective_keeps_matmul_outputs_of_every_step():
+    """
+    Why `unroll+selective` memory grows with the number of forecast steps:
+    the matmul outputs kept by the inner selective checkpoints live in the
+    checkpoint's own cache, which the outer step checkpoint does not release
+    before backward. Plain `unroll` (and `unroll+internal`) keep only the small
+    state between steps.
+    """
+    growth = {}
+    for name, mode in [
+        ("unroll", False),
+        ("unroll+internal", True),
+        ("unroll+selective", checkpointing.SELECTIVE),
+    ]:
+        growth[name] = (
+            _held_after_forward_mib(mode, 4) - _held_after_forward_mib(mode, 2)
+        ) / 2
+    assert growth["unroll"] < 0.1
+    assert growth["unroll+internal"] < 0.1
+    assert growth["unroll+selective"] > 10 * max(growth["unroll"], 0.01)

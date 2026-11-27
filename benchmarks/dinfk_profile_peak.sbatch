@@ -15,6 +15,7 @@
 #   export VENV=/scratch/users/$USER/venv
 #   sbatch -A <your course/project tag> benchmarks/dinfk_profile_peak.sbatch
 # Other card:  sbatch -A <tag> --gpus=gb10:1 ...   (WIDTH=1024 for gb10)
+# Extra training flags, e.g. EXTRA_ARGS="--compile_layers" (torch.compile)
 # Dry check on the login node:  DRY_RUN=1 bash benchmarks/dinfk_profile_peak.sbatch
 set -eu
 REPO=${REPO:-$HOME/baltic-sea-forecasting}
@@ -36,4 +37,4 @@ extra=""
 [ "${DRY_RUN:-0}" = 1 ] && extra="--dry_run"
 [ "${KERNELS_ONLY:-0}" = 1 ] && extra="$extra --kernels_only"
 python "$REPO/benchmarks/profile_peak.py" --workdir "$DATA" \
-    --output_dir "$OUT" --width "$WIDTH" $extra
+    --output_dir "$OUT" --width "$WIDTH" --extra_args="${EXTRA_ARGS:-}" $extra

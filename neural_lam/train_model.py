@@ -29,6 +29,7 @@ from .models import (
     GraphFM,
 )
 from .models.flow_map import add_flow_map_args
+from .compile_layers import compile_layers
 from .profiling import StepProfiler
 from .weather_dataset import WeatherDataModule
 
@@ -720,6 +721,13 @@ def main(input_args=None):
         "the profiled update sorted by time (default: False)",
     )
     parser.add_argument(
+        "--compile_layers",
+        action="store_true",
+        help="torch.compile the computation of every GNN layer (fused "
+        "kernels; checkpoint policies keep working). See "
+        "neural_lam/compile_layers.py (default: False)",
+    )
+    parser.add_argument(
         "--limit_train_batches",
         type=float,
         default=None,
@@ -1077,6 +1085,8 @@ def main(input_args=None):
     )
     # The GNN layers exist now, so the checkpoint policy can be applied to them
     model.update_checkpointing(args.ar_steps_train)
+    if args.compile_layers:
+        print(f"torch.compile: {compile_layers(model)} GNN layers compiled")
 
     if args.eval:
         prefix = f"eval-{args.eval}-"
