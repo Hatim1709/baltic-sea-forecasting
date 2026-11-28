@@ -246,6 +246,20 @@ class GraphEFM(ARProbModel):
             args.latent_dim if args.latent_dim is not None else args.hidden_dim
         )
 
+        # Sites that use sparse attention instead of the original GNN layer
+        # (--attention_sites), only implemented for hierarchical graphs
+        attention_kwargs = {
+            "attention_sites": tuple(getattr(args, "attention_sites", ())),
+            "attention_heads": getattr(args, "attention_heads", None),
+            "attention_edge_mode": getattr(
+                args, "attention_edge_mode", "key_value"
+            ),
+        }
+        if attention_kwargs["attention_sites"] and not self.hierarchical_graph:
+            raise ValueError(
+                "--attention_sites is only implemented for hierarchical graphs"
+            )
+
         # Specify dimensions of data
         print(
             "Loaded graph with "
@@ -276,6 +290,8 @@ class GraphEFM(ARProbModel):
                     hidden_layers=args.hidden_layers,
                     output_dist=args.prior_dist,
                     num_grid_con_mesh_nodes=self.num_grid_con_mesh_nodes,
+                    submodel="prior",
+                    **attention_kwargs,
                 )
             else:
                 self.prior_model = GraphLatentEncoder(
@@ -314,6 +330,8 @@ class GraphEFM(ARProbModel):
                 hidden_layers=args.hidden_layers,
                 output_dist="diagonal",
                 num_grid_con_mesh_nodes=self.num_grid_con_mesh_nodes,
+                submodel="encoder",
+                **attention_kwargs,
             )
             # Decoder
             self.decoder = HiGraphLatentDecoder(
@@ -333,8 +351,16 @@ class GraphEFM(ARProbModel):
                 output_std=bool(args.output_std),
                 num_grid_con_mesh_nodes=self.num_grid_con_mesh_nodes,
                 num_interior_nodes=self.num_interior_nodes,
+                intra_layer_type=args.decoder_intra_layer,
+                **attention_kwargs,
             )
+
         else:
+            if args.decoder_intra_layer != "interaction":
+                raise ValueError(
+                    "--decoder_intra_layer is only implemented for hierarchical graphs"
+                )
+
             self.encoder = GraphLatentEncoder(
                 latent_dim,
                 self.g2m_edge_index,
