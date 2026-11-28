@@ -29,6 +29,7 @@ from .models import (
     GraphFM,
 )
 from .models.flow_map import add_flow_map_args
+from .phase_lengths import phase_ends
 from .weather_dataset import WeatherDataModule
 from .sparse_attention import INTRA_LAYER_TYPES
 from .attention_sites import SITE_CHOICES
@@ -865,6 +866,20 @@ def main(input_args=None):
         "up over --stoch_warmup_epochs) then --crps_ar2_epochs at ar=2, see "
         "training_scripts/graph_crps/README.md.",
     )
+    parser.add_argument(
+        "--phase_epochs",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Epochs of each phase of --scheduler pretrain (3 values, "
+        "default 100 200 25) or --scheduler probabilistic (4 values, default "
+        "100 200 25 25). The cosine learning-rate curve spans their sum. "
+        "With --scheduler probabilistic the last phase uses --crps_weight "
+        "if it is above 0, else 1e4. A run that is continued with --load "
+        "must be given the same values, and --restore_opt: without it the "
+        "optimizer and the learning-rate curve start again at every phase "
+        "and at every restart.",
+    )
     add_flow_map_args(parser)
 
     args = parser.parse_args(input_args)
@@ -1371,6 +1386,15 @@ def main(input_args=None):
 
         model.configure_optimizers = configure_optimizers_finetune
 
+    if args.phase_epochs is not None and args.scheduler not in (
+        "pretrain",
+        "probabilistic",
+    ):
+        raise ValueError(
+            "--phase_epochs is only for --scheduler pretrain and "
+            "--scheduler probabilistic"
+        )
+
     if args.eval:
         strategy = (
             "ddp" if args.kl_beta > 0 else "ddp_find_unused_parameters_true"
@@ -1388,7 +1412,9 @@ def main(input_args=None):
         )
 
     elif args.scheduler == "pretrain":
-        total_epochs = 100 + 200 + 25
+        ends = phase_ends(args.phase_epochs, (100, 200, 25))
+        lengths = [ends[0], ends[1] - ends[0], ends[2] - ends[1]]
+        total_epochs = ends[-1]
         _add_cosine_lr(model, total_epochs)
 
         def _pretrain_p1():
@@ -1404,20 +1430,20 @@ def main(input_args=None):
         _run_phases(
             [
                 (
-                    "Phase 1/3: 100 epochs, ar=1, kl_beta=0",
-                    100,
+                    f"Phase 1/3: {lengths[0]} epochs, ar=1, kl_beta=0",
+                    ends[0],
                     _pretrain_p1,
                     "ddp_find_unused_parameters_true",
                 ),
                 (
-                    "Phase 2/3: 200 epochs, ar=1, kl_beta=0.1",
-                    300,
+                    f"Phase 2/3: {lengths[1]} epochs, ar=1, kl_beta=0.1",
+                    ends[1],
                     _pretrain_p2,
                     "ddp",
                 ),
                 (
-                    "Phase 3/3: 25 epochs, ar=2, kl_beta=0.1",
-                    325,
+                    f"Phase 3/3: {lengths[2]} epochs, ar=2, kl_beta=0.1",
+                    ends[2],
                     _pretrain_p3,
                     "ddp",
                 ),
@@ -1489,7 +1515,11 @@ def main(input_args=None):
         )
 
     elif args.scheduler == "probabilistic":
-        total_epochs = 100 + 200 + 25 + 25
+        ends = phase_ends(args.phase_epochs, (100, 200, 25, 25))
+        lengths = [ends[0]] + [b - a for a, b in zip(ends, ends[1:])]
+        total_epochs = ends[-1]
+        # Weight of the CRPS term in the last phase
+        last_crps_weight = args.crps_weight if args.crps_weight > 0 else 1e4
         _add_cosine_lr(model, total_epochs)
 
         def _prob_p1():
@@ -1504,32 +1534,32 @@ def main(input_args=None):
             _set_ar_steps(2)
 
         def _prob_p4():
-            model.crps_weight = 1e4
+            model.crps_weight = last_crps_weight
 
         _run_phases(
             [
                 (
-                    "Phase 1/4: 100 epochs, kl_beta=0",
-                    100,
+                    f"Phase 1/4: {lengths[0]} epochs, kl_beta=0",
+                    ends[0],
                     _prob_p1,
                     "ddp_find_unused_parameters_true",
                 ),
                 (
-                    "Phase 2/4: 200 epochs, kl_beta=0.1",
-                    300,
+                    f"Phase 2/4: {lengths[1]} epochs, kl_beta=0.1",
+                    ends[1],
                     _prob_p2,
                     "ddp",
                 ),
                 (
-                    "Phase 3/4: 25 epochs, ar=2, kl_beta=0.1",
-                    325,
+                    f"Phase 3/4: {lengths[2]} epochs, ar=2, kl_beta=0.1",
+                    ends[2],
                     _prob_p3,
                     "ddp",
                 ),
                 (
-                    "Phase 4/4: 25 epochs, ar=2, kl_beta=0.1, "
-                    "crps_weight=1e4",
-                    350,
+                    f"Phase 4/4: {lengths[3]} epochs, ar=2, kl_beta=0.1, "
+                    f"crps_weight={last_crps_weight:g}",
+                    ends[3],
                     _prob_p4,
                     "ddp",
                 ),

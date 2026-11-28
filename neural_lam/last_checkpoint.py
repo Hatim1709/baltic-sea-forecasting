@@ -6,6 +6,9 @@ import os
 # Third-party
 import pytorch_lightning as pl
 
+# Local
+from .checkpoint_files import previous_path, put_in_place, temporary_path
+
 
 class LastCheckpoint(pl.callbacks.Checkpoint):
     """
@@ -22,6 +25,12 @@ class LastCheckpoint(pl.callbacks.Checkpoint):
     then written once, when the first ``fit`` ended, and every later phase
     resumed from that file.
 
+    The checkpoint is written under a temporary name and renamed when it is
+    complete, and the checkpoint of the epoch before is kept as
+    ``last-prev.ckpt`` (see checkpoint_files.py). A process or node that dies
+    while the file is written therefore never leaves the run without a
+    usable checkpoint.
+
     Subclasses ``Checkpoint`` so that Lightning runs it after the other
     callbacks, like its own checkpoint callbacks.
     """
@@ -34,6 +43,11 @@ class LastCheckpoint(pl.callbacks.Checkpoint):
         # Same attribute name as ModelCheckpoint, read by train_model.py
         self.last_model_path = ""
 
+    @property
+    def previous_model_path(self):
+        """Where the checkpoint of the epoch before the last one is kept."""
+        return previous_path(os.path.join(self.dirpath, self.FILE_NAME))
+
     def on_train_epoch_end(self, trainer, pl_module):
         """Save the full training state of the epoch that just ended."""
         if trainer.fast_dev_run or trainer.sanity_checking:
@@ -41,6 +55,10 @@ class LastCheckpoint(pl.callbacks.Checkpoint):
         if trainer.is_global_zero:
             os.makedirs(self.dirpath, exist_ok=True)
         path = os.path.join(self.dirpath, self.FILE_NAME)
-        # Writes on rank zero only
-        trainer.save_checkpoint(path)
+        temporary = temporary_path(path)
+        # Writes on rank zero only, and returns on every rank only after the
+        # file has been written
+        trainer.save_checkpoint(temporary)
+        if trainer.is_global_zero:
+            put_in_place(temporary, path)
         self.last_model_path = path

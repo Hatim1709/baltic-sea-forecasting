@@ -77,7 +77,38 @@ def test_last_checkpoint_follows_every_phase(tmp_path):
     assert saved_state(path) == (5, 6 * BATCHES)
 
     assert model.epochs_trained == [0, 1, 2, 3, 4, 5]
-    assert [p.name for p in (tmp_path / "saved").iterdir()] == ["last.ckpt"]
+    # The checkpoint of the epoch before is kept; no temporary file is left
+    assert sorted(p.name for p in (tmp_path / "saved").iterdir()) == [
+        "last-prev.ckpt",
+        "last.ckpt",
+    ]
+    assert callback.previous_model_path == str(
+        tmp_path / "saved" / "last-prev.ckpt"
+    )
+    assert saved_state(callback.previous_model_path) == (4, 5 * BATCHES)
+
+
+def test_first_epoch_leaves_one_checkpoint(tmp_path):
+    """After one epoch there is nothing to keep as the previous one."""
+    torch.manual_seed(0)
+    callback = LastCheckpoint(tmp_path)
+    fit(TinyModel(), callback, max_epochs=1)
+    assert [p.name for p in tmp_path.iterdir()] == ["last.ckpt"]
+    assert saved_state(callback.last_model_path) == (0, BATCHES)
+
+
+def test_resume_from_the_previous_checkpoint(tmp_path):
+    """If last.ckpt is lost, training continues from last-prev.ckpt and
+    repeats only the epoch that was lost."""
+    torch.manual_seed(0)
+    model = TinyModel()
+    callback = LastCheckpoint(tmp_path)
+    fit(model, callback, max_epochs=3)
+    (tmp_path / "last.ckpt").unlink()
+
+    fit(model, callback, max_epochs=4, ckpt_path=callback.previous_model_path)
+    assert model.epochs_trained == [0, 1, 2, 2, 3]
+    assert saved_state(callback.last_model_path) == (3, 4 * BATCHES)
 
 
 def test_checkpoint_holds_the_weights_of_its_epoch(tmp_path):
